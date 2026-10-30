@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/icon/icon-256.png" width="128" alt="Hero Meter icon"></p>
+
 # Hero Meter
 
 A damage meter for City of Heroes (Homecoming), modeled on Details! from World of Warcraft.

@@ -3460,7 +3460,7 @@ class BuildWin(DarkWin):
         vis = max(1, (H - rh * 2) // rh)
         self.scroll = max(0, min(self.scroll, len(rows) - vis))
         y = rh
-        self._shown = []
+        self._shown_rows = []
         for i, r in enumerate(rows[self.scroll:self.scroll + vis]):
             if i % 2:
                 cv.create_rectangle(0, y, W, y + rh, fill=C["row_alt"], width=0)
@@ -3473,7 +3473,7 @@ class BuildWin(DarkWin):
                 txt = truncate(f, r["cells"][k], cw - px(10))
                 tx = x0 + px(4) if anc == "w" else x0 + cw - px(6)
                 cv.create_text(tx, y + rh // 2, text=txt, font=f, fill=r["colors"][k], anchor=anc)
-            self._shown.append((y, y + rh, r))
+            self._shown_rows.append((y, y + rh, r))
             y += rh
         if len(rows) > vis:
             th = max(px(16), int((H - rh * 2) * vis / len(rows)))
@@ -3484,7 +3484,7 @@ class BuildWin(DarkWin):
                        fill=C["dim"], anchor="w")
 
     def _motion(self, e):
-        for y0, y1, r in getattr(self, "_shown", []):
+        for y0, y1, r in getattr(self, "_shown_rows", []):
             if y0 <= e.y < y1 and r.get("tip"):
                 title, lines = r["tip"]
                 self.app.tip.show(e.x_root, e.y_root, title, C["gold"], lines, ("build", title))
@@ -4644,6 +4644,10 @@ class App:
         font_ok = win_load_font(res_path("fonts", "Oswald.ttf"))
         self.root = tk.Tk()
         self.root.withdraw()
+        try:
+            self.root.iconbitmap(default=res_path("icon.ico"))     # every window + taskbar
+        except Exception:
+            pass
         self.cfg = dict(DEFAULTS)
         self.load_cfg()
         load_custom_themes(self.cfg.get("custom_themes"))
@@ -5437,7 +5441,7 @@ class App:
                 res = (tag, data.get("html_url") or "https://github.com/%s/releases" % REPO)
             except Exception:
                 res = None
-            self.root.after(0, lambda: self._update_result(res, force))
+            self._update_pending = (res, force)       # read by poll() on the Tk thread
         threading.Thread(target=work, daemon=True).start()
 
     def _update_result(self, res, force):
@@ -5989,6 +5993,10 @@ class App:
 
     def poll(self):
         backlog = False
+        up = getattr(self, "_update_pending", None)
+        if up is not None:
+            self._update_pending = None
+            self._update_result(*up)
         try:
             now = time.time()
             if self.tail is not None:
@@ -6063,16 +6071,44 @@ class App:
                         self.poll)
 
     def quit(self):
+        if getattr(self, "_quitting", False):
+            return
+        self._quitting = True
         for w in self.windows():
             try:
                 w.save_geom()
             except Exception:
                 pass
         self.save_views()
-        self.root.destroy()
+        self.shutdown()
+
+    def shutdown(self):
+        """Stop the Windows event hook and close every window before Tk goes away.
+        Leaving the hook (or Tk objects) alive while Python exits is what caused the
+        'alloc: invalid block' crash box on close."""
+        try:
+            if getattr(self, "_fg_hook", None):
+                _u32().UnhookWinEvent.argtypes = [ctypes.c_void_p]
+                _u32().UnhookWinEvent(self._fg_hook)
+                self._fg_hook = None
+        except Exception:
+            pass
+        try:
+            self.root.quit()
+        except Exception:
+            pass
 
     def run(self):
-        self.root.mainloop()
+        try:
+            self.root.mainloop()
+        finally:
+            self.shutdown()
+            try:
+                self.root.destroy()
+            except Exception:
+                pass
+            sys.stdout.flush() if sys.stdout else None
+            os._exit(0)          # skip interpreter teardown (Tk is already closed)
 
 
 def main():
