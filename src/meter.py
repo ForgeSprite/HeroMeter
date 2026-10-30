@@ -481,6 +481,27 @@ def win_load_font(path):
         return False
 
 
+def win_set_icon(top, path):
+    """Put the app icon on a window through Windows itself (Tk's iconbitmap doesn't reach
+    borderless windows), so the taskbar and Alt+Tab show it."""
+    try:
+        u = ctypes.windll.user32
+        u.LoadImageW.restype = ctypes.c_void_p
+        u.LoadImageW.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p, ctypes.c_uint, ctypes.c_int, ctypes.c_int,
+                                 ctypes.c_uint]
+        u.SendMessageW.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_void_p, ctypes.c_void_p]
+        hwnd = hwnd_of(top)
+        cache = win_set_icon.__dict__.setdefault("handles", {})
+        for which, size in ((1, u.GetSystemMetrics(11)), (0, u.GetSystemMetrics(49))):   # big, small
+            key = (path, size)
+            if key not in cache:
+                cache[key] = u.LoadImageW(None, path, 1, size, size, 0x10)              # IMAGE_ICON, LR_LOADFROMFILE
+            if cache[key]:
+                u.SendMessageW(hwnd, 0x80, which, cache[key])                         # WM_SETICON
+    except Exception:
+        pass
+
+
 def win_appwindow(top):
     """Give a borderless (overrideredirect) window a taskbar button."""
     try:
@@ -4697,6 +4718,7 @@ class App:
         self.root.deiconify()
         self.root.update_idletasks()
         win_appwindow(self.root)
+        win_set_icon(self.root, res_path("icon.ico"))
         self.root.protocol("WM_DELETE_WINDOW", self.quit)
         self._ver = -1
         self._last_draw = 0.0
@@ -4752,6 +4774,7 @@ class App:
         m = MainWindow(self, view)
         self.meters.append(m)
         m.top.update_idletasks()
+        win_set_icon(m.top, res_path("icon.ico"))
         set_noactivate(m.top, self.cfg["no_focus"])
         return m
 
