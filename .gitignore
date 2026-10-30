@@ -1,0 +1,18 @@
+# built files
+*.exe
+build/
+dist/
+*.spec
+__pycache__/
+*.pyc
+
+# personal settings, logs and fonts (never commit these)
+hero_meter_config.json
+paragon_meter_config.json
+coh_details_config.json
+*.log
+portable.txt
+/fonts/
+
+# scratch / test scripts
+src/_*.py

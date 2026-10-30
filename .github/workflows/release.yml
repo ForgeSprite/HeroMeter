@@ -1,0 +1,62 @@
+# Push a tag like v2.0.0 and GitHub builds HeroMeter.exe from this source
+# and attaches it (plus its SHA-256 checksum) to a new Release.
+name: Build & Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install PyInstaller
+        run: python -m pip install --upgrade pip pyinstaller
+
+      - name: Check the version matches the tag
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}".TrimStart("v")
+          $line = Select-String -Path src/meter.py -Pattern '^VERSION = "(.+)"'
+          $ver = $line.Matches[0].Groups[1].Value
+          if ($ver -ne $tag) { throw "src/meter.py says VERSION = $ver but the tag is v$tag" }
+
+      - name: Build
+        shell: pwsh
+        run: ./build.ps1
+
+      - name: Checksum
+        shell: pwsh
+        run: |
+          $h = (Get-FileHash dist/HeroMeter.exe -Algorithm SHA256).Hash
+          "$h  HeroMeter.exe" | Out-File -Encoding ascii dist/SHA256.txt
+          Get-Content dist/SHA256.txt
+
+      - name: Upload build (manual runs)
+        if: "!startsWith(github.ref, 'refs/tags/')"
+        uses: actions/upload-artifact@v4
+        with:
+          name: HeroMeter
+          path: |
+            dist/HeroMeter.exe
+            dist/SHA256.txt
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/HeroMeter.exe
+            dist/SHA256.txt
+          generate_release_notes: true
