@@ -3358,7 +3358,7 @@ class BuildWin(DarkWin):
         planned, extra, procs, total = self.res
         rows, note = [], ""
         if self.tab == 0:
-            cols = [("#", 30, "e"), ("Power", 0, "w"), ("Slots", 46, "e"), ("Uses", 52, "e"), ("Output", 70, "e"),
+            cols = [("#", 30, "e"), ("Power", 0, "w"), ("Slots", 46, "e"), ("Seen", 52, "e"), ("Output", 70, "e"),
                     ("Share", 120, "w"), ("Per use", 66, "e"), ("Per slot", 66, "e"), ("Verdict", 190, "w")]
             order = sorted(planned, key=lambda r: (-r.output, -(r.uses + r.seen), r.level))
             top = max([r.share for r in planned] or [1]) or 1
@@ -3370,7 +3370,7 @@ class BuildWin(DarkWin):
                                        fmt(r.output / max(1, r.slots)) if r.output else "", r.verdict],
                              "colors": [C["dim"], C["text"] if r.active else C["dim"]] + [C["text"]] * 6 + [vc],
                              "bar": (5, r.share / top, vc) if r.output else None, "tip": self._tip(r)})
-            note = "Output = damage + healing + absorbs from the chat log.  Total: %s" % fmt(total)
+            note = "Output = damage + healing + absorbs from the chat log. Seen = times the log shows the power (each hit counts).  Total: %s" % fmt(total)
         elif self.tab == 1:
             cols = [("Lvl", 36, "e"), ("Power", 0, "w"), ("Slots", 46, "e"), ("Slotted with", 260, "w"),
                     ("In the log", 220, "w")]
