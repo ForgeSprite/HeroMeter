@@ -1,5 +1,6 @@
-# Push a tag like v2.0.0 and GitHub builds HeroMeter.exe from this source
-# and attaches it (plus its SHA-256 checksum) to a new Release.
+# Push a tag like v2.0.0 (or v2.0.0-beta.1 for a beta) and GitHub builds HeroMeter.exe
+# from this source and attaches it (plus its SHA-256 checksum) to a new Release.
+# Tags with a dash (v2.0.0-beta.1, v2.1.0-rc.1) are published as pre-releases.
 name: Build & Release
 
 on:
@@ -28,9 +29,10 @@ jobs:
         shell: pwsh
         run: |
           $tag = "${{ github.ref_name }}".TrimStart("v")
+          $base = $tag.Split("-")[0]
           $line = Select-String -Path src/meter.py -Pattern '^VERSION = "(.+)"'
           $ver = $line.Matches[0].Groups[1].Value
-          if ($ver -ne $tag) { throw "src/meter.py says VERSION = $ver but the tag is v$tag" }
+          if ($ver -ne $base) { throw "src/meter.py says VERSION = $ver but the tag is v$tag" }
 
       - name: Build
         shell: pwsh
@@ -52,10 +54,22 @@ jobs:
             dist/HeroMeter.exe
             dist/SHA256.txt
 
-      - name: Publish release
-        if: startsWith(github.ref, 'refs/tags/')
+      - name: Publish beta (pre-release)
+        if: startsWith(github.ref, 'refs/tags/') && contains(github.ref_name, '-')
         uses: softprops/action-gh-release@v2
         with:
+          name: Hero Meter ${{ github.ref_name }} (beta)
+          prerelease: true
+          body_path: docs/BETA_NOTES.md
+          files: |
+            dist/HeroMeter.exe
+            dist/SHA256.txt
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/') && !contains(github.ref_name, '-')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Hero Meter ${{ github.ref_name }}
           files: |
             dist/HeroMeter.exe
             dist/SHA256.txt
