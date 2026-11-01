@@ -13,7 +13,11 @@ import tkinter as tk
 import tkinter.font as tkfont
 from tkinter import filedialog
 
+import re
 import cohparse as cp
+import cohassets
+import cohskin
+import cohframe
 import mids
 import pettypes
 
@@ -107,7 +111,7 @@ DEFAULTS = {
     # bars
     "row_spacing": 1,
     "grow_up": False,
-    "bar_texture": "gloss",
+    "bar_texture": "coh",
     "bar_color_mode": "pet",
     "bar_single_color": "#3fc7eb",
     "bar_bg_color": "#232125",
@@ -162,7 +166,22 @@ DEFAULTS = {
     "active_profile": "Default",
     "char_profiles": {},
     "auto_profile": True,
-    "skin": "default",
+    "skin": "coh",                      # window shape/style: "coh" (City of Heroes) or "details"
+    "window_theme": "coh",              # window colors (works with every skin)
+    "match_game_color": True,           # use the color of the game's own windows for the border
+    "color_reader": 3,                  # version of the screen color reader that saved char_colors
+    "demo_mode": False,                 # show example bars (for setting up the look); off at every start
+    "custom_window_themes": {},
+    "layout": "default",                # size/layout preset
+    "bar_theme": "minimal",             # bar colors
+    "look_version": 2,
+    "coh_body_alpha": 0.8,              # how solid the CoH window body is (the game's look)
+    "coh_frame_scale": 1.0,
+    "coh_color_mode": "auto",           # auto = match the character's in-game window color
+    "coh_manual": [80, 94, 100],
+    "coh_last": None,
+    "char_colors": {},
+    "char_picked": {},                   # characters whose color you picked by hand (never re-read)
     "custom_skins": {},
     # Mids' Reloaded
     "build_geometry": "",
@@ -180,7 +199,7 @@ GLOBAL_KEYS = {"bd_geometry", "recap_geometry", "opt_geometry", "log_path", "log
                "load_history", "opt_page", "custom_themes", "renames", "pet_types", "profiles",
                "active_profile", "char_profiles", "auto_profile", "custom_skins",
                "build_geometry", "char_builds", "auto_build", "build_source",
-               "game_dir", "check_updates", "last_update_check"}
+               "game_dir", "check_updates", "last_update_check", "char_colors", "char_picked", "custom_window_themes"}
 
 # Skins = the shape of the meter (sizes, fonts, layout); themes = its colors.
 SKIN_KEYS = ["row_height", "font_size", "row_spacing", "row_font", "text_style", "show_icons", "show_rank",
@@ -339,11 +358,34 @@ def actor_color(name, kind):
     return PET_COLORS[sum(ord(c) for c in name) % len(PET_COLORS)]
 
 
+def coh_bar_lines(color, h, bright=1.0):
+    """The game's glossy bar: a white sheen on the upper part that is stronger on bright colors and
+    softer on dark ones (so every color shines like it does in game), and a darker lower half."""
+    r, g, b = hex2rgb(color)
+    lum = (0.3 * r + 0.59 * g + 0.11 * b) / 255.0
+    k = 0.10 + 0.34 * lum                      # how much white the sheen mixes in
+    out = []
+    for y in range(h):
+        t = y / max(1, h - 1)
+        if t <= 0.12:
+            wmix, f = k, 1.06
+        elif t < 0.5:
+            wmix, f = k * 0.6 * (0.5 - t) / 0.38, 1.02
+        else:
+            wmix, f = 0.0, 0.94 - 0.42 * (t - 0.5)
+        f *= bright
+        out.append(rgb2hex(*(min(255.0, (c * f) * (1 - wmix) + 255 * wmix * bright) for c in (r, g, b))))
+    return out
+
+
 def bar_lines(color, h, style="gloss", bright=1.0):
     """Line colors (top to bottom) for one bar, in the chosen texture."""
     key = (color, h, bright, style)
     g = _GRAD.get(key)
     if g is not None:
+        return g
+    if style == "coh":
+        g = _GRAD[key] = coh_bar_lines(color, h, bright)
         return g
     if style == "gloss":
         g = gradient(color, h, bright)
@@ -374,6 +416,8 @@ def bar_lines(color, h, style="gloss", bright=1.0):
                 f = (1.1 if t < 0.5 else 0.78) * bright
             elif style == "outline":
                 f = 0.32 * bright
+            elif style == "coh":          # handled below (shine that follows the color's brightness)
+                f = 1.0
             else:  # dark
                 f = (0.62 - 0.12 * t) * bright
                 if y == 0:
@@ -900,9 +944,449 @@ THEMES = {
         sep="#2b1745", block="#120a20", block_head="#241140", row_alt="#190e2c", sel="#3b1a66", gold="#00f0ff"),
 }
 
-BAR_STYLES = [("gloss", "Glossy (Details)"), ("smooth", "Smooth"), ("flat", "Flat"), ("dark", "Dark"),
+BAR_STYLES = [("coh", "City of Heroes (rounded gloss)"), ("gloss", "Glossy (Details)"), ("smooth", "Smooth"), ("flat", "Flat"), ("dark", "Dark"),
               ("raised", "Raised edges"), ("inset", "Inset (sunken)"), ("glass", "Glass"),
               ("split", "Split two-tone"), ("outline", "Outline (neon)")]
+
+
+# Skins are the shape and style of the windows. Window Themes are their colors, and Bar Themes color the
+# bars; every theme works with every skin.
+WINDOW_SKINS = {"coh": {"label": "City of Heroes", "coh": True}, "details": {"label": "Details!"}}
+
+COH_STOCK_BLUE = (51, 153, 255)        # the game's default window color: Border 20% / 60% / 100%
+WINDOW_THEMES = {}
+for _k, _lab, _rgb, _src in (("coh", "City of Heroes", COH_STOCK_BLUE, "hero"),
+                             ("minimal", "Details! Dark", (150, 150, 160), "minimal"),
+                             ("hero", "Paragon Blue", (51, 153, 255), "hero"),
+                             ("villain", "Arachnos Red", (166, 41, 41), "villain"),
+                             ("praetorian", "Praetorian Steel", (112, 112, 114), "praetorian"),
+                             ("rikti", "Rikti Green", (70, 190, 95), "rikti"),
+                             ("shadow", "Midnight Purple", (130, 70, 210), "shadow"),
+                             ("phoenix", "Ember", (230, 110, 40), "phoenix"),
+                             ("frost", "Frost", (175, 225, 255), "frost"),
+                             ("neon", "Synthwave", (255, 43, 214), "neon")):
+    WINDOW_THEMES[_k] = {"label": _lab, "border": _rgb, "C": dict(THEMES[_src]["C"])}
+BUILTIN_WINDOW_THEMES = set(WINDOW_THEMES)
+WT_ACCENTS = ("gold", "menu_head", "icon_hover", "dim", "faint", "sep", "sel", "block", "block_head",
+              "menu_bg", "menu_hover", "row_alt")
+PILL = {}
+
+
+def load_window_themes(store):
+    # saved themes are reloaded; built-ins and a theme being tried out in the editor ("__...") are kept
+    for k in [k for k in WINDOW_THEMES if k not in BUILTIN_WINDOW_THEMES and not k.startswith("__")]:
+        WINDOW_THEMES.pop(k, None)
+    for k, v in (store or {}).items():
+        try:
+            WINDOW_THEMES[k] = {"label": v["label"], "border": tuple(int(x) for x in v["border"]),
+                                "C": dict(v.get("C") or {})}
+        except Exception:
+            pass
+
+
+def wtheme_copy(t):
+    return {"label": t["label"], "border": tuple(t["border"]), "C": dict(t["C"])}
+
+
+def wtheme_serialize(t):
+    return {"label": t["label"], "border": list(t["border"]), "C": dict(t["C"])}
+
+
+def skin_palette(skin, wtheme, border_rgb=None):
+    """All window colors for a skin + window theme (+ the border color, e.g. matched from the game)."""
+    t = WINDOW_THEMES.get(wtheme) or WINDOW_THEMES["coh"]
+    rgb = tuple(border_rgb or t["border"])
+    full = dict(BASE_C)
+    if skin == "coh":
+        full.update(cohskin.coh_palette(rgb))
+        if wtheme != "coh":                   # the theme's accents on top of the game frame
+            for k in ("gold", "menu_head"):
+                if k in t["C"]:
+                    full[k] = t["C"][k]
+    else:
+        full.update(t["C"])
+        if border_rgb:
+            full["border"] = cohskin._hex(*rgb)
+    return full
+
+
+def apply_look(skin, wtheme, bar_theme, border_rgb=None):
+    """Window colors from the skin + window theme, bar colors from the bar theme. Returns the old colors."""
+    global PLAYER_COLOR
+    old = dict(C)
+    C.clear()
+    C.update(skin_palette(skin, wtheme, border_rgb))
+    t = THEMES.get(bar_theme) or THEMES["minimal"]
+    PET_COLORS[:] = t["pets"]
+    TIER_COLORS.clear()
+    TIER_COLORS.update(t["tiers"])
+    PLAYER_COLOR = t["player"]
+    C["enemy"] = t.get("C", {}).get("enemy", BASE_C["enemy"])
+    _GRAD.clear()
+    return old
+
+
+def is_coh(app):
+    return app.cfg.get("skin") == "coh"
+
+
+COH_KEY = cohskin.COH_KEY
+COH_STANDIN = "Bahnschrift SemiBold"          # close to the game's Montreal until its fonts can be read
+COH_STANDIN_BOLD = "Bahnschrift SemiBold"
+STANDIN_ROW_FONTS = ("Bahnschrift SemiBold", "Bahnschrift", "Oswald", "Segoe UI Semibold", "")
+
+
+def coh_scale(app=None):
+    """Frame size factor: 1.0 = the game's windows at 4K / 150%."""
+    f = float((app.cfg.get("coh_frame_scale", 1.0) if app is not None else 1.0) or 1.0)
+    return max(0.4, S / 1.5 * f)
+
+
+def _hex_rgb(h):
+    h = h.lstrip("#")
+    return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
+
+
+def widget_at(w, x, y):
+    """Deepest mapped child of w under the screen point (x, y)."""
+    best = w
+    for ch in reversed(w.winfo_children()):
+        try:
+            if not ch.winfo_ismapped() or isinstance(ch, tk.Toplevel):
+                continue
+            cx, cy = ch.winfo_rootx(), ch.winfo_rooty()
+            if cx <= x < cx + ch.winfo_width() and cy <= y < cy + ch.winfo_height():
+                return widget_at(ch, x, y)
+        except Exception:
+            pass
+    return best
+
+
+_TXT = {}
+
+
+_ICON_FONT = None
+
+
+def icon_font_path():
+    global _ICON_FONT
+    if _ICON_FONT is None:
+        wd = os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "Fonts")
+        _ICON_FONT = next((os.path.join(wd, f) for f in ("SegoeIcons.ttf", "segmdl2.ttf")
+                           if os.path.exists(os.path.join(wd, f))), "")
+    return _ICON_FONT
+
+
+def coh_glyph_image(app, glyph, size, fill, stroke):
+    """A title-bar icon drawn smooth with a dark outline, so it shows on any background."""
+    fp = icon_font_path()
+    return coh_text_image(app, glyph, size, fill, 10 ** 6, stroke, font_path=fp) if fp else None
+
+
+def coh_text_image(app, text, size, fill, max_w, stroke, font_path=None):
+    """Game-style text (Montreal DemiBold with a soft round dark outline) as a Tk image, or None."""
+    if font_path is None:
+        font_path = next((f for f in getattr(app, "_coh_font_files", []) if "demibold" in f.lower()), None)
+    if not font_path:
+        return None
+    key = (text, size, fill, max_w, stroke, font_path)
+    im = _TXT.get(key)
+    if im is not None:
+        return im
+    try:
+        from PIL import Image, ImageDraw, ImageFont, ImageTk
+        f = ImageFont.truetype(font_path, size)
+        t = text
+        while t and f.getlength(t) + 2 * stroke > max_w:
+            t = t[:-2] + "\u2026" if len(t) > 2 else ""
+        w = int(f.getlength(t)) + 2 * stroke + 4
+        asc, desc = f.getmetrics()
+        h = asc + desc + 2 * stroke + 2
+        img = Image.new("RGBA", (max(1, w), h), (0, 0, 0, 0))
+        ImageDraw.Draw(img).text((stroke + 1, h // 2), t, font=f, fill=fill, anchor="lm",
+                                 stroke_width=stroke, stroke_fill=(14, 14, 18, 255))
+        im = ImageTk.PhotoImage(img, master=app.root)
+    except Exception:
+        return None
+    if len(_TXT) > 200:
+        _TXT.clear()
+    _TXT[key] = im
+    return im
+
+
+ERROR_LOG = os.path.join(DATA_DIR, "error_log.txt")
+
+
+def log_error(where, exc_type, exc, tb):
+    """Keep a short log of errors (the exe has no console), for diagnostics and bug reports."""
+    try:
+        import traceback as _tb
+        import datetime
+        text = "".join(_tb.format_exception(exc_type, exc, tb))
+        old = ""
+        if os.path.isfile(ERROR_LOG):
+            with open(ERROR_LOG, "r", encoding="utf-8", errors="replace") as fh:
+                old = fh.read()[-60000:]
+        with open(ERROR_LOG, "w", encoding="utf-8") as fh:
+            fh.write(old + "\n[%s] %s (v%s)\n%s" % (datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), where,
+                                                    VERSION, text))
+    except Exception:
+        pass
+
+
+class ColorPicker:
+    """An eyedropper laid over the game window: a magnifier follows the mouse, a click on any game
+    window's border takes its color. Right-click or Esc cancels."""
+    Z, N = 9, 15                       # zoom and pixels across in the magnifier
+
+    def __init__(self, app, rect, img, done):
+        self.app, self.rect, self.img, self.done = app, rect, img, done
+        l, t, r, b = rect
+        self.ov = ov = tk.Toplevel(app.root)
+        ov.overrideredirect(True)
+        ov.geometry("%dx%d+%d+%d" % (r - l, b - t, l, t))
+        ov.configure(bg="#000000", cursor="crosshair")
+        ov.attributes("-alpha", 0.01)
+        ov.attributes("-topmost", True)
+        self.mag = mg = tk.Toplevel(app.root)
+        mg.overrideredirect(True)
+        mg.attributes("-topmost", True)
+        mg.configure(bg="#8c949c")
+        size = self.Z * self.N
+        self.cv = tk.Canvas(mg, width=size, height=size, highlightthickness=0, bg="#000000", bd=0)
+        self.cv.pack(padx=1, pady=(1, 0))
+        self.lab = tk.Label(mg, text="", bg="#14181c", fg="#e8e8e8", font=FONTS["small"], justify="center",
+                            wraplength=max(size, px(170)))
+        self.lab.pack(fill="x", padx=1, pady=(0, 1))
+        self._ph = None
+        for w in (ov, mg):
+            w.bind("<Escape>", lambda e: self.close(None))
+            w.bind("<Button-3>", lambda e: self.close(None))
+        ov.bind("<Motion>", self._move)
+        ov.bind("<Button-1>", self._click)
+        self._timer = app.root.after(90000, lambda: self.close(None))
+        try:
+            ov.focus_force()
+        except Exception:
+            pass
+        x, y = app.root.winfo_pointerxy()
+        self._show(x, y)
+
+    def _show(self, xr, yr):
+        from PIL import ImageTk, Image as _I
+        l, t, r, b = self.rect
+        x, y = xr - l, yr - t
+        h = self.N // 2
+        crop = self.img.crop((x - h, y - h, x + h + 1, y + h + 1)).resize((self.Z * self.N,) * 2, _I.NEAREST)
+        self._ph = ImageTk.PhotoImage(crop)
+        cv = self.cv
+        cv.delete("all")
+        cv.create_image(0, 0, image=self._ph, anchor="nw")
+        z0 = h * self.Z
+        cv.create_rectangle(z0 - 1, z0 - 1, z0 + self.Z, z0 + self.Z, outline="#ffffff")
+        cv.create_rectangle(z0 - 2, z0 - 2, z0 + self.Z + 1, z0 + self.Z + 1, outline="#000000")
+        try:
+            px_ = self.img.getpixel((min(max(x, 0), r - l - 1), min(max(y, 0), b - t - 1)))[:3]
+        except Exception:
+            px_ = (0, 0, 0)
+        self.lab.configure(text="Click the border of any game window\n(right-click or Esc to cancel)\n"
+                                "under the mouse: %d, %d, %d" % tuple(px_))
+        self.mag.update_idletasks()
+        mw, mh = self.mag.winfo_reqwidth(), self.mag.winfo_reqheight()
+        mx = xr + 28 if xr + 28 + mw < r else xr - 28 - mw
+        my = yr + 28 if yr + 28 + mh < b else yr - 28 - mh
+        self.mag.geometry("+%d+%d" % (mx, my))
+
+    def _move(self, e):
+        self._show(e.x_root, e.y_root)
+
+    def _click(self, e):
+        l, t, _r, _b = self.rect
+        try:
+            col = cohskin.pick_color_at(self.img, e.x_root - l, e.y_root - t)
+        except Exception:
+            col = None
+        self.close(col)
+
+    def close(self, col):
+        try:
+            self.app.root.after_cancel(self._timer)
+        except Exception:
+            pass
+        for w in (self.ov, self.mag):
+            try:
+                w.destroy()
+            except Exception:
+                pass
+        if self.done:
+            d, self.done = self.done, None
+            d(col)
+
+
+class Backdrop:
+    """The see-through CoH frame drawn behind a window (a per-pixel alpha layered window).
+
+    The window itself is keyed transparent except for its bars, text and buttons. Clicks that land
+    on the see-through parts reach this backdrop, which hands them back to the right widget."""
+    _cache = {}
+
+    def __init__(self, win):
+        self.win = win
+        self.t = t = tk.Toplevel(win.app.root)
+        t.overrideredirect(True)
+        t.configure(bg="#000000")
+        t.withdraw()
+        self.hwnd = None
+        self.key = None
+        self.visible = False
+        self._target = None
+        self._last_render = 0.0
+        self._pending = False
+        t.bind("<ButtonPress-1>", lambda e: self._fwd(e, "<ButtonPress-1>"))
+        t.bind("<B1-Motion>", lambda e: self._fwd(e, "<B1-Motion>"))
+        t.bind("<ButtonRelease-1>", lambda e: self._fwd(e, "<ButtonRelease-1>"))
+        t.bind("<Double-Button-1>", lambda e: self._fwd(e, "<Double-Button-1>"))
+        t.bind("<ButtonPress-3>", lambda e: self._fwd(e, "<Button-3>"))
+        t.bind("<MouseWheel>", lambda e: self._fwd(e, "<MouseWheel>"))
+        t.bind("<Motion>", lambda e: self._fwd(e, "<Motion>"))
+        win.top.bind("<Destroy>", lambda e: self.destroy() if e.widget is win.top else None, add="+")
+
+    def destroy(self):
+        try:
+            self.t.destroy()
+        except Exception:
+            pass
+
+    def _fwd(self, e, seq):
+        top = self.win.top
+        if seq == "<ButtonPress-1>" or self._target is None or seq in ("<Motion>", "<MouseWheel>", "<Button-3>",
+                                                                       "<Double-Button-1>"):
+            w = widget_at(top, e.x_root, e.y_root)
+            if seq == "<ButtonPress-1>":
+                self._target = w
+        else:
+            w = self._target
+        if seq == "<ButtonRelease-1>":
+            self._target = None
+        if seq == "<Motion>":
+            try:
+                cur = w.cget("cursor")
+            except Exception:
+                cur = ""
+            if cur != getattr(self, "_cur", ""):
+                self._cur = cur
+                self.t.configure(cursor=cur)
+        try:
+            kw = dict(x=e.x_root - w.winfo_rootx(), y=e.y_root - w.winfo_rooty(), rootx=e.x_root, rooty=e.y_root)
+            if seq == "<B1-Motion>":
+                w.event_generate("<Motion>", state=0x100, **kw)
+            elif seq == "<MouseWheel>":
+                w.event_generate("<MouseWheel>", delta=e.delta, **kw)
+            else:
+                if seq != "<Motion>":
+                    w.event_generate("<Motion>", **kw)
+                w.event_generate(seq, **kw)
+        except Exception:
+            pass
+
+    def _get_hwnd(self):
+        if self.hwnd is None:
+            self.t.update_idletasks()
+            h = hwnd_of(self.t)
+            u = _u32()
+            st = u.GetWindowLongW(ctypes.c_void_p(h), -20)
+            u.SetWindowLongW(ctypes.c_void_p(h), -20, st | 0x80000 | 0x80 | 0x08000000)
+            self.hwnd = h
+        return self.hwnd
+
+    def sync(self, force=False):
+        win = self.win
+        app = win.app
+        t = win.top
+        try:
+            vis = bool(t.winfo_exists()) and t.state() == "normal" and t.winfo_ismapped() and is_coh(app)
+        except Exception:
+            vis = False
+        if not vis:
+            if self.visible:
+                self.t.withdraw()
+                self.visible = False
+            return
+        if not self.visible:
+            self.t.deiconify()
+            self.visible = True
+            force = True
+        hwnd = self._get_hwnd()
+        x, y, w, h = t.winfo_rootx(), t.winfo_rooty(), t.winfo_width(), t.winfo_height()
+        if w < 20 or h < 20:
+            return
+        try:
+            alpha = float(t.attributes("-alpha"))
+        except Exception:
+            alpha = 1.0
+        glow = bool(getattr(win, "_glow", False))
+        sc = coh_scale(app)
+        tab = not getattr(win, "NO_TAB", False)
+        key = (w, h, C["border"], glow, round(sc, 3), tab, float(app.cfg.get("coh_body_alpha", 0.8)))
+        import time as _t
+        if key != self.key or force or getattr(self, "_alpha", None) != alpha:
+            img = Backdrop._cache.get(key)
+            if img is None:
+                img = cohframe.render_fast(w, h, _hex_rgb(C["border"]), sc, tab=tab, glow=glow, body_alpha=key[-1])
+                if len(Backdrop._cache) > 12:
+                    Backdrop._cache.clear()
+                Backdrop._cache[key] = img
+            cohframe.update_layered(hwnd, img, x, y, int(255 * max(0.0, min(1.0, alpha))))
+            self.key = key
+            self._alpha = alpha
+        self._move(x, y)
+
+    def _settle(self):
+        self._pending = False
+        self.sync(force=True)
+
+    def _move(self, x, y):
+        try:
+            u = _u32()
+            # just below the window it belongs to (SWP_NOSIZE | SWP_NOACTIVATE)
+            u.SetWindowPos(ctypes.c_void_p(self.hwnd), ctypes.c_void_p(hwnd_of(self.win.top)), x, y, 0, 0,
+                           0x0001 | 0x0010)
+        except Exception:
+            pass
+
+
+def round_rect_points(x0, y0, x1, y1, r, n=10):
+    """Outline points of a rectangle with true circular corners of radius r."""
+    import math
+    r = max(0.5, min(r, (x1 - x0) / 2.0, (y1 - y0) / 2.0))
+    pts = []
+    for cx, cy, a0 in ((x1 - r, y0 + r, -90), (x1 - r, y1 - r, 0), (x0 + r, y1 - r, 90), (x0 + r, y0 + r, 180)):
+        for i in range(n + 1):
+            a = math.radians(a0 + 90.0 * i / n)
+            pts += [cx + r * math.cos(a), cy + r * math.sin(a)]
+    return pts
+
+
+def rrect(cv, x0, y0, x1, y1, r, **kw):
+    """Rounded rectangle on a canvas."""
+    r = max(1, min(r, (x1 - x0) // 2, (y1 - y0) // 2))
+    pts = [x0 + r, y0, x1 - r, y0, x1, y0, x1, y0 + r, x1, y1 - r, x1, y1, x1 - r, y1, x0 + r, y1, x0, y1,
+           x0, y1 - r, x0, y0 + r, x0, y0]
+    return cv.create_polygon(pts, smooth=True, **kw)
+
+
+def coh_track(rh):
+    """The empty part of a CoH bar: the game's glossy dark gray."""
+    key = ("track", rh)
+    g = _GRAD.get(key)
+    if g is None:
+        g = []
+        for y in range(rh):
+            t = y / max(1, rh - 1)
+            f = 1.25 - 0.35 * t if t < 0.5 else 0.95 - 0.35 * (t - 0.5)
+            g.append(shade("#3a3c40", f))
+        _GRAD[key] = g
+    return g
 
 
 def theme_copy(t):
@@ -994,7 +1478,7 @@ def group_nodes(app, seg):
         return i[0] if i else m.name
 
     def counted(label, n):
-        return label if n == 1 else "%s \u00d7%d" % (label, n)
+        return label if n == 1 else "%s x%d" % (label, n)
 
     def leaf(a, rank):
         nodes[a.name] = {"name": a.name, "color": actor_color(a.name, a.kind), "children": None,
@@ -1035,6 +1519,9 @@ def group_nodes(app, seg):
                               lambda m: m.name + ": ", 5))
         pet_members += other
     top = []
+    pname0 = app.parser.player
+    if player is None and pet_keys and pname0 and pname0 != "You":
+        player = cp.Actor(pname0, "player")      # you, at zero, so you can always click "You + Pets"
     if player is not None:
         top.append(leaf(player, 0))
     if pet_keys:
@@ -1144,9 +1631,10 @@ def build_rows(app, seg, mode=None):
         attr = {"damage": "damage", "dps": "damage", "taken": "taken", "heal": "heal", "hps": "heal",
                 "healed": "healed", "absorb": "absorb", "protect": "protect"}[mode]
         total = sum(getattr(a, attr) for a in actors.values()) or 1.0
+        has_pets = any(x.kind != "player" and getattr(x, attr) > 0 for x in actors.values())
         for a in actors.values():
             v = getattr(a, attr)
-            if v <= 0:
+            if v <= 0 and not (a.kind == "player" and has_pets):
                 continue
             pct = 100.0 * v / total
             d_a = adur(app, a, dur)
@@ -1226,7 +1714,74 @@ class BD:
         self.members = []
 
 
-def build_breakdown(app, seg, mode, key):
+PROC_COLOR = "#ffb21f"
+
+
+def is_procs_key(k):
+    return isinstance(k, str) and k.endswith("@procs")
+
+
+def fold_procs(app, seg, bd, key, open_bucket=None):
+    """Collapse every proc into one 'Procs' row (per pet in a group), or show just one opened bucket."""
+    if bd is None or not bd.tabs:
+        return bd
+    label, kind, data = bd.tabs[0]
+    if kind != "stats" or not data or not isinstance(data[0][0], str):
+        return bd
+    prefixed = bd.kind == "group" and key not in ("@t1", "@t2", "@t3")
+    pname = app.parser.player if getattr(app, "parser", None) is not None else None
+    pa = None
+    try:
+        pa = seg.actors.get(pname) if pname else None
+    except Exception:
+        pa = None
+    pkeys = set()
+    if pa is not None:
+        for attr in ("powers", "heal_powers", "absorb_powers"):
+            pkeys.update(getattr(pa, attr, {}) or {})
+
+    def bucket(k):
+        if prefixed and k in pkeys:
+            return "@procs" if ": " in k else None
+        pre, sep, rest = k.partition(": ")
+        if not sep:
+            return None
+        if not prefixed:
+            return "@procs"
+        return (pre + ": @procs") if ": " in rest else None
+
+    keep, groups = [], {}
+    for it in data:
+        b = bucket(it[0])
+        if b is None:
+            keep.append(it)
+        else:
+            groups.setdefault(b, []).append(it)
+    if not groups:
+        return bd
+    if open_bucket is not None:
+        members = groups.get(open_bucket)
+        if members is None:
+            return bd
+        bd.tabs[0] = (label, kind, members)
+        bd.title += "  \u203a  " + open_bucket.replace("@procs", "Procs")
+        bd.procs_open = open_bucket
+        return bd
+    for b, members in groups.items():
+        st = cp.Stat()
+        for it in members:
+            st.merge(it[2])
+        name = b.replace("@procs", "Procs") + "  (%d)" % len(members)
+        keep.append((b, name, st, PROC_COLOR))
+    bd.tabs[0] = (label, kind, keep)
+    return bd
+
+
+def build_breakdown(app, seg, mode, key, procs=None):
+    return fold_procs(app, seg, _build_breakdown(app, seg, mode, key), key, procs)
+
+
+def _build_breakdown(app, seg, mode, key):
     if seg is None:
         return None
     bd = BD()
@@ -1388,7 +1943,10 @@ class DMenu:
         self.top = t = tk.Toplevel(app.root)
         t.overrideredirect(True)
         t.attributes("-topmost", True)
-        t.configure(bg=C["sep"])
+        if is_coh(app):
+            self._init_coh(x, y, min_width)
+            return
+        t.configure(bg=C["border"] if is_coh(app) else C["sep"])
         f, fr = FONTS["ui"], FONTS["small"]
         self.ih = px(22)
         self.hh = px(20)
@@ -1419,6 +1977,49 @@ class DMenu:
         self._prev = self._buttons()
         t.after(40, self._watch)
 
+    # --- City of Heroes menu: drawn like the game's Menu window, see-through -------------
+    def _init_coh(self, x, y, min_width):
+        app, t = self.app, self.top
+        self.coh = True
+        font = next((f for f in getattr(app, "_coh_font_files", []) if "demibold" in f.lower()), None)
+        self.look = cohframe.MenuLook(coh_scale(app), font)
+        w, h = cohframe.menu_size(self.items, self.look, px(min_width))
+        self.w, self.h = w, h
+        x, y = place_popup(x, y, w, h, app.root, dx=2, dy=2)
+        self.x, self.y = x, y
+        t.geometry("%dx%d+%d+%d" % (w, h, x, y))
+        t.configure(bg="#000000")
+        t.update_idletasks()
+        hwnd = hwnd_of(t)
+        u = _u32()
+        st = u.GetWindowLongW(ctypes.c_void_p(hwnd), -20)
+        u.SetWindowLongW(ctypes.c_void_p(hwnd), -20, st | 0x80000 | 0x80)
+        self.hwnd = hwnd
+        self.slots = []
+        self.hover = -1
+        self.draw()
+        t.bind("<Motion>", self._motion)
+        t.bind("<Leave>", lambda e: self._set_hover(-1))
+        t.bind("<Button-1>", self._click)
+        t.bind("<Escape>", lambda e: self.close())
+        t.bind("<FocusOut>", lambda e: t.after(80, self._maybe_close))
+        t.after(30, t.focus_force)
+        self._prev = self._buttons()
+        t.after(40, self._watch)
+
+    def _draw_coh(self):
+        if getattr(self, "_base", None) is None:
+            self._base, self.slots = cohframe.render_menu(self.items, self.look, self.w, self.h, -1)
+            self._pm = {}
+        k = self.hover
+        pm = self._pm.get(k)
+        if pm is None:
+            slot = next((sl for sl in self.slots if sl[2] == k), None)
+            img = self._base if slot is None or self.items[k].get("disabled") else \
+                cohframe.menu_hot(self._base, self.items, self.look, self.w, slot)
+            pm = self._pm[k] = cohframe.premultiply(img)
+        cohframe.update_layered(self.hwnd, pm, self.x, self.y, 255)
+
     @staticmethod
     def _buttons():
         try:
@@ -1446,6 +2047,8 @@ class DMenu:
             self.close()
 
     def draw(self):
+        if getattr(self, "coh", False):
+            return self._draw_coh()
         cv, f, fr = self.cv, FONTS["ui"], FONTS["small"]
         cv.delete("all")
         self.slots = []
@@ -1532,7 +2135,10 @@ class Tip:
             self.top.attributes("-topmost", True)
             self.top.configure(bg=C["border"])
             self.cv = tk.Canvas(self.top, bg=C["menu_bg"], highlightthickness=0, bd=0)
-            self.cv.pack(padx=1, pady=1)
+        self.cv.pack_forget()
+        coh = is_coh(self.app)
+        self.cv.configure(bg=C["menu_bg"])
+        self.cv.pack(padx=0 if coh else 1, pady=0 if coh else 1)
         self.key = key
         cv = self.cv
         cv.delete("all")
@@ -1542,10 +2148,10 @@ class Tip:
         for l, r, _f, _c in lines:
             w = max(w, f.measure(l) + fs.measure(r) + px(40))
         h = px(26) + lh * max(1, len(lines)) + px(6)
-        cv.configure(width=w, height=h)
+        cv.configure(width=w + 2 if is_coh(self.app) else w, height=h + 2 if is_coh(self.app) else h)
         cv.create_rectangle(0, 0, w, px(24), fill=C["block_head"], width=0)
         cv.create_rectangle(0, 0, px(4), px(24), fill=color, width=0)
-        cv.create_text(px(10), px(12), text=title, font=fh, fill=C["text"], anchor="w")
+        cv.create_text(px(10), px(12), text=truncate(fh, title, w - px(18)), font=fh, fill=C["text"], anchor="w")
         y = px(28)
         if not lines:
             cv.create_text(px(10), y + lh // 2, text="No details", font=fs, fill=C["dim"], anchor="w")
@@ -1565,6 +2171,21 @@ class Tip:
         else:
             x, y = place_popup(mx, my, w + 2, h + 2, self.app.root, dx=px(18), dy=px(10))
         self.top.geometry("+%d+%d" % (x, y))
+        coh = is_coh(self.app)
+        self.top.configure(bg=C["menu_bg"] if coh else C["border"])
+        r = px(8)
+        bw = max(2, px(2))
+        if coh:
+            # an edge with true round corners, as thick at the corners as along the sides
+            cv.create_polygon(round_rect_points(bw / 2.0, bw / 2.0, w + 2 - bw / 2.0, h + 2 - bw / 2.0,
+                                                r - bw / 2.0), fill="", outline="#8c949c", width=bw)
+        if coh or getattr(self, "_rounded", False):
+            try:
+                self.top.update_idletasks()
+                cohskin.round_window(hwnd_of(self.top), w + 2, h + 2, r if coh else 0)
+                self._rounded = coh
+            except Exception:
+                pass
         self.top.deiconify()
 
     def move(self, x, y):
@@ -1592,7 +2213,7 @@ class DarkWin:
         t.title(title)
         geom = app.cfg.get(geom_key) or default_geom
         t.geometry(geom)
-        self.th = px(self._th_base())
+        self.th = self._calc_th()
         self.tb = tk.Canvas(t, height=self.th, bg=C["title"], highlightthickness=0, bd=0)
         self.tb.pack(side="top", fill="x", padx=1, pady=(1, 0))
         self.body = tk.Frame(t, bg=C["bg"], bd=0, highlightthickness=0)
@@ -1611,12 +2232,80 @@ class DarkWin:
         gs = px(13)
         self.grip = tk.Canvas(t, width=gs, height=gs, bg=C["bg"], highlightthickness=0, bd=0, cursor="size_nw_se")
         self._draw_grip()
-        self.grip.place(relx=1.0, rely=1.0, anchor="se", x=-1, y=-1)
         self.grip.bind("<ButtonPress-1>", self._resize_start)
         self.grip.bind("<B1-Motion>", self._resize_move)
         self.grip.bind("<ButtonRelease-1>", lambda e: self.save_geom())
         t.attributes("-topmost", bool(app.cfg["topmost"]))
         self.apply_alpha()
+        self._shape = None
+        t.bind("<Configure>", self._on_top_conf, add="+")
+        t.after(60, self.apply_frame)
+
+    def _on_top_conf(self, e):
+        if e.widget is not self.top:
+            return
+        if is_coh(self.app):
+            if getattr(self, "backdrop", None) is not None:
+                self.backdrop.sync()
+            return
+        size = (e.width, e.height)
+        if size != self._shape:
+            self._shape = size
+            self.top.after_idle(self._square_frame)
+
+    def _square_frame(self):
+        t = self.top
+        try:
+            cohskin.round_window(hwnd_of(t), t.winfo_width(), t.winfo_height(), 0)
+        except Exception:
+            pass
+
+    def _calc_th(self):
+        if is_coh(self.app) and not getattr(self, "NO_TAB", False):
+            return cohframe.metrics(coh_scale(self.app))[0]
+        return px(self._th_base())
+
+    def pack_frame(self):
+        """Lay out the title bar and body for the current skin (MainWindow has its own)."""
+        coh = is_coh(self.app)
+        self.th = self._calc_th()
+        self.tb.configure(height=self.th, bg=C["title"])
+        self.tb.pack_forget()
+        self.body.pack_forget()
+        if coh:
+            b = cohframe.metrics(coh_scale(self.app))[1]
+            self.tb.pack(side="top", fill="x", padx=b, pady=(0, b))
+            self.body.pack(side="top", fill="both", expand=True, padx=b + px(3), pady=(0, b + px(3)))
+        else:
+            self.tb.pack(side="top", fill="x", padx=1, pady=(1, 0))
+            self.body.pack(side="top", fill="both", expand=True, padx=1, pady=(0, 1))
+        tk.Misc.lift(self.grip)
+
+    def apply_frame(self):
+        """Switch this window between the see-through CoH frame and the plain square one."""
+        t = self.top
+        coh = is_coh(self.app)
+        try:
+            t.attributes("-transparentcolor", COH_KEY if coh else "")
+        except Exception:
+            pass
+        if coh:
+            try:
+                _u32().SetWindowRgn(ctypes.c_void_p(hwnd_of(t)), None, True)
+            except Exception:
+                pass
+            t.configure(bg=COH_KEY)
+            if getattr(self, "backdrop", None) is None:
+                self.backdrop = Backdrop(self)
+        else:
+            t.configure(bg=C["border"])
+            self._square_frame()
+        if not getattr(self, "IS_MAIN", False):
+            self.pack_frame()
+        self._draw_grip()
+        self.draw_title()
+        if getattr(self, "backdrop", None) is not None:
+            self.backdrop.sync(force=True)
 
     def _th_base(self):
         return int(self.app.cfg.get("title_height", 22)) if getattr(self, "IS_MAIN", False) else 22
@@ -1628,16 +2317,31 @@ class DarkWin:
         return self.right_buttons
 
     def _draw_grip(self):
-        gs = px(13)
-        self.grip.configure(width=gs, height=gs)
+        coh = is_coh(self.app)
+        gs = px(20) if coh else px(13)
+        self.grip.configure(width=gs, height=gs, bg=C["bg"])
         self.grip.delete("all")
-        for i in range(3):
-            o = px(3) + i * px(3)
-            self.grip.create_line(gs - 2, o, o, gs - 2, fill=C["faint"])
+        if coh:
+            for i in range(3):
+                o = px(5) + i * px(4)
+                self.grip.create_line(gs - 3, o, o, gs - 3, fill="#8c949c", width=max(1, px(1)))
+        else:
+            for i in range(3):
+                o = px(3) + i * px(3)
+                self.grip.create_line(gs - 2, o, o, gs - 2, fill=C["faint"])
+        self.place_grip()
+
+    def place_grip(self):
+        if is_coh(self.app):
+            inset = cohframe.metrics(coh_scale(self.app))[1] + int(round(8 * coh_scale(self.app)))
+            self.grip.place(relx=1.0, rely=1.0, anchor="se", x=-inset, y=-inset)
+        else:
+            self.grip.place(relx=1.0, rely=1.0, anchor="se", x=-1, y=-1)
+        tk.Misc.lift(self.grip)
 
     def rescale(self):
         self.min_size = (px(self._min_base[0]), px(self._min_base[1]))
-        self.th = px(self._th_base())
+        self.th = self._calc_th()
         self.tb.configure(height=self.th)
         self._draw_grip()
         self.draw_title()
@@ -1659,11 +2363,32 @@ class DarkWin:
             pass
 
     # --- title bar ---------------------------------------------------------
+    def _otext(self, cv, x, y, text, font, fill, anchor="w", tags=(), ow=1, oc="#0e0e12"):
+        """Text with a dark outline, the way the game draws window text."""
+        for dx in range(-ow, ow + 1):
+            for dy in range(-ow, ow + 1):
+                if dx or dy:
+                    cv.create_text(x + dx, y + dy, text=text, font=font, fill=oc, anchor=anchor, tags=tags)
+        return cv.create_text(x, y, text=text, font=font, fill=fill, anchor=anchor, tags=tags)
+
+    def _close_img(self, size, hot):
+        k = (size, hot)
+        cache = getattr(self.app, "_close_imgs", None)
+        if cache is None:
+            cache = self.app._close_imgs = {}
+        if k not in cache:
+            from PIL import ImageTk
+            cache[k] = ImageTk.PhotoImage(cohframe.close_button(size, hot), master=self.app.root)
+        return cache[k]
+
     def draw_title(self):
         tb = self.tb
         tb.delete("all")
         w = tb.winfo_width()
         h = self.th
+        coh = is_coh(self.app)
+        if coh:
+            return self._draw_title_coh(tb, w, h)
         tb.create_rectangle(0, h - 1, w, h, fill="#000000", width=0)
         x = px(6)
         bw = px(22)
@@ -1701,6 +2426,88 @@ class DarkWin:
         hot = self._btn_hover == "titleword"
         tb.create_text(x, h // 2 + 1, text=truncate(FONTS["title"], text, xr - x), font=FONTS["title"],
                        fill=C["icon_hover"] if hot else C["text"], anchor="w", tags=("titleword",))
+        if self.title_menu is not None:
+            tb.tag_bind("titleword", "<Enter>", lambda e: self._hover_btn("titleword"))
+            tb.tag_bind("titleword", "<Leave>", lambda e: self._hover_btn(None))
+
+    def _draw_title_coh(self, tb, w, h):
+        sc = coh_scale(self.app)
+        cy = h // 2
+        x = int(30 * sc)
+        bw = max(int(round(26 * sc)), 10)
+        icon_col, icon_hot = "#9ca0a6", "#ffffff"
+        for i, (g, cb, tip) in enumerate(self.left_buttons):
+            tag = "btnL%d" % i
+            col = icon_hot if self._btn_hover == tag else "#c4c8cc"
+            gimg = coh_glyph_image(self.app, g, max(10, int(round(23 * sc))), col, max(1, int(round(1.4 * sc))))
+            if gimg is not None:
+                tb.create_image(x + bw // 2, cy, image=gimg, tags=("btn", tag))
+            else:
+                tb.create_text(x + bw // 2, cy, text=g, font=FONTS["icon"], fill=col, tags=("btn", tag))
+            tb.create_rectangle(x, 0, x + bw, h, outline="", fill="", tags=("btn", tag))
+            self._bind_btn(tag, cb)
+            x += bw
+        if self.left_buttons:
+            x += px(4)
+        xr = w - int(26 * sc)
+        cs = max(12, int(22 * sc))
+        gap = max(2, int(round(6 * sc)))
+        stroke = max(1, int(round(1.4 * sc)))
+        for i, (g, cb, tip) in enumerate(self._visible_right()):
+            tag = "btnR%d" % i
+            hot = self._btn_hover == tag
+            if g == G_CLOSE:
+                img = self._close_img(cs, hot)
+                tb.create_image(xr - cs // 2, cy, image=img, tags=("btn", tag))
+                tb.create_rectangle(xr - cs - px(2), 0, xr + px(2), h, outline="", fill="", tags=("btn", tag))
+                xr -= cs + int(round(10 * sc))
+            else:
+                window_ctl = g == G_MIN
+                gs = max(10, int(round((19 if window_ctl else 23) * sc)))
+                gimg = coh_glyph_image(self.app, g, gs, icon_hot if hot else "#c4c8cc", stroke)
+                bwi = max(bw, (gimg.width() if gimg else 0) + gap)
+                if gimg is not None:
+                    tb.create_image(xr - bwi // 2, cy, image=gimg, tags=("btn", tag))
+                else:
+                    tb.create_text(xr - bwi // 2, cy, text=g, font=FONTS["icon_s" if window_ctl else "icon"],
+                                   fill=icon_hot if hot else icon_col, tags=("btn", tag))
+                tb.create_rectangle(xr - bwi, 0, xr, h, outline="", fill="", tags=("btn", tag))
+                xr -= bwi
+                if g == G_MIN:
+                    xr -= int(round(8 * sc))
+            self._bind_btn(tag, cb)
+        right = self.title_right
+        if right:
+            rimg = coh_text_image(self.app, right, max(9, int(round(23 * sc))), "#b4b8bc", 10 ** 6, stroke)
+            if rimg is not None:
+                tb.create_image(xr - gap, cy, image=rimg, anchor="e")
+                xr -= rimg.width() + gap * 2
+            else:
+                tid = tb.create_text(xr - px(4), cy, text=right, font=FONTS["title_small"], fill="#969ca2",
+                                     anchor="e")
+                xr = tb.bbox(tid)[0] - px(6)
+        text = self.title
+        if self.title_menu is not None:
+            text += "  \u25be"
+        hot = self._btn_hover == "titleword"
+        arrow = self.title_menu is not None
+        aw = int(round(14 * sc)) if arrow else 0
+        col = "#ffffff" if hot else "#a8acb0"
+        img = coh_text_image(self.app, self.title, max(10, int(round(31 * sc))), col,
+                             max(px(20), xr - x - aw), max(1, int(round(1.6 * sc))))
+        if img is not None:
+            tb.create_image(x, cy, image=img, anchor="w", tags=("titleword",))
+            if arrow:           # the game font has no arrow glyph, so draw a small one
+                ax = x + img.width() + int(round(8 * sc))
+                a = max(3, int(round(6 * sc)))
+                tb.create_polygon(ax - a - 1, cy - a // 2 - 1, ax + a + 1, cy - a // 2 - 1, ax, cy + a // 2 + 2,
+                                  fill="#0e0e12", outline="", tags=("titleword",))
+                tb.create_polygon(ax - a, cy - a // 2, ax + a, cy - a // 2, ax, cy + a // 2 + 1, fill=col,
+                                  outline="", tags=("titleword",))
+                tb.create_rectangle(x, 0, ax + a + 2, h, outline="", fill="", tags=("titleword",))
+        else:
+            self._otext(tb, x, cy, truncate(FONTS["title"], text, max(px(20), xr - x)), FONTS["title"],
+                        "#ffffff" if hot else "#a8acb0", tags=("titleword",), ow=1)
         if self.title_menu is not None:
             tb.tag_bind("titleword", "<Enter>", lambda e: self._hover_btn("titleword"))
             tb.tag_bind("titleword", "<Leave>", lambda e: self._hover_btn(None))
@@ -1798,10 +2605,10 @@ def nlines_default(app):
     return 999 if key_down(0x10) else int(app.cfg["tip_lines"])
 
 
-def build_drill_rows(app, seg, drill):
+def build_drill_rows(app, seg, drill, procs=None):
     """Rows for one actor/enemy/ability: its powers (or targets) with their share of the total."""
     mode, key = drill
-    bd = build_breakdown(app, seg, mode, key)
+    bd = build_breakdown(app, seg, mode, key, procs)
     if bd is None or not bd.tabs:
         return None, []
     _label, kind, data = bd.tabs[0]
@@ -1836,6 +2643,28 @@ def build_drill_rows(app, seg, drill):
             rows.append(r)
     rows.sort(key=lambda r: -r.value)
     return bd, rows
+
+
+def demo_rows(app):
+    """Example bars for setting up the look: you, each pet tier, other pets and a Procs row."""
+    me = app.parser.player if getattr(app, "parser", None) and app.parser.player not in ("You", "") else "Your Hero"
+    spec = [(me, "player", 42800, actor_color(me, "player"), None),
+            ("Lich", "group", 31200, TIER_COLORS.get(3, "#a335ee"), "T3"),
+            ("Grave Knight x2", "group", 24900, TIER_COLORS.get(2, "#0070dd"), "T2"),
+            ("Zombie x3", "group", 15300, TIER_COLORS.get(1, "#1eff00"), "T1"),
+            ("Other Pets x2", "group", 6100, PET_COLORS[4 % len(PET_COLORS)], "\u03a3"),
+            ("Procs  (3)", "power", 2400, PROC_COLOR, None),
+            ("Spectral Terror", "pet", 1350, PET_COLORS[7 % len(PET_COLORS)], None)]
+    total = float(sum(v for _n, _k, v, _c, _g in spec))
+    dur = 120.0
+    rows = []
+    for name, kind, v, color, glyph in spec:
+        pct = 100.0 * v / total
+        txt, cols = rparts(app, fmt(v), [("ps", fps(v / dur)), ("pct", "%.1f%%" % pct)])
+        r = Row("@demo:" + name, name, v, txt, fmt(v), color, kind, glyph)
+        r.cols = cols
+        rows.append(r)
+    return rows
 
 
 TOTAL_MODES = ("damage", "dps", "taken", "heal", "hps", "healed", "absorb", "protect", "kills", "xp")
@@ -1909,6 +2738,8 @@ class MainWindow(DarkWin):
         self.rows = []
         self.headers = []
         self.drill = None
+        self.drill_procs = None
+        self._procs_for = None
         self.scroll = 0
         self.hover = -1
         self.flash = None
@@ -1941,15 +2772,24 @@ class MainWindow(DarkWin):
 
     def apply_layout(self):
         c = self.app.cfg
-        self.top.configure(bg=c["border_color"] if c["border_on"] else c["body_bg"])
+        coh = is_coh(self.app)
+        b = 1
+        self.top.configure(bg=COH_KEY if coh else (c["border_color"] if c["border_on"] else c["body_bg"]))
         for w in (self.tb, self.body, self.status, self.cv, self.tabbar):
             w.pack_forget()
-        if c["title_bottom"]:
-            self.tb.pack(side="bottom", fill="x", padx=1, pady=(0, 1))
-            self.body.pack(side="top", fill="both", expand=True, padx=1, pady=(1, 0))
+        self.th = self._calc_th()
+        self.tb.configure(height=self.th, bg=C["title"])
+        if coh:
+            fb = cohframe.metrics(coh_scale(self.app))[1]
+            pad = px(4)
+            self.tb.pack(side="top", fill="x", padx=fb, pady=(0, fb))
+            self.body.pack(side="top", fill="both", expand=True, padx=fb + pad, pady=(pad, fb + pad))
+        elif c["title_bottom"]:
+            self.tb.pack(side="bottom", fill="x", padx=b, pady=(0, b))
+            self.body.pack(side="top", fill="both", expand=True, padx=b, pady=(b, 0))
         else:
-            self.tb.pack(side="top", fill="x", padx=1, pady=(1, 0))
-            self.body.pack(side="top", fill="both", expand=True, padx=1, pady=(0, 1))
+            self.tb.pack(side="top", fill="x", padx=b, pady=(b, 0))
+            self.body.pack(side="top", fill="both", expand=True, padx=b, pady=(0, b))
         self.body.configure(bg=c["body_bg"])
         self.cv.configure(bg=c["body_bg"])
         if c["statusbar"]:
@@ -1976,9 +2816,17 @@ class MainWindow(DarkWin):
         plus = px(20)
         tw = max(px(30), min(px(120), (W - plus) // max(1, n)))
         self._tabw = tw
+        coh = is_coh(self.app)
         for i, m in enumerate(self.tabs):
             on = i == self.tab
             x0 = i * tw
+            if coh:
+                tb.create_rectangle(0, 0, W, h, fill=C["bg"], width=0) if i == 0 else None
+                rrect(tb, x0 + px(2), px(1), x0 + tw - px(2), h - px(1), (h - px(2)) // 2,
+                      fill=C["sel"] if on else C["block_head"], outline=C["border"] if on else C["sep"])
+                tb.create_text(x0 + tw // 2, h // 2, text=truncate(FONTS["small"], MODE_LABEL[m], tw - px(12)),
+                               font=FONTS["small"], fill=C["text"] if on else C["dim"])
+                continue
             tb.create_rectangle(x0, 0, x0 + tw - 1, h, fill=C["sel"] if on else C["title"], width=0)
             if on:
                 tb.create_rectangle(x0, h - px(2), x0 + tw - 1, h, fill=C["gold"], width=0)
@@ -2016,6 +2864,8 @@ class MainWindow(DarkWin):
         self.tab = max(0, min(i, len(self.tabs) - 1))
         self.mode = self.tabs[self.tab]
         self.drill = None
+        self.drill_procs = None
+        self._procs_for = None
         self.scroll = 0
         self.hover = -1
         self.app.use(self)
@@ -2120,10 +2970,19 @@ class MainWindow(DarkWin):
             return
         W, h = st.winfo_width(), int(st.cget("height"))
         seg = self.app.get_segment()
-        for key, anchor, x in ((self.app.cfg["sb_left"], "w", px(6)), (self.app.cfg["sb_center"], "center", W // 2),
-                               (self.app.cfg["sb_right"], "e", W - px(16))):
-            st.create_text(x, h // 2, text=self.app.status_value(key, seg), font=FONTS["title_small"],
-                           fill=C["dim"], anchor=anchor)
+        f = FONTS["title_small"]
+        c = self.app.cfg
+        left, mid, right = (self.app.status_value(c[k], seg) for k in ("sb_left", "sb_center", "sb_right"))
+        gap = px(10)
+        r_edge = W - px(16) - (f.measure(right) if right else 0)        # where the right text starts
+        if mid:                                                         # the middle text never runs into the right
+            mid = truncate(f, mid, max(0, 2 * min(W // 2 - px(6), r_edge - gap - W // 2)))
+        m_edge = (W // 2 - f.measure(mid) // 2) if mid else r_edge
+        if left:                                                        # long names are shortened, not overlapped
+            left = truncate(f, left, max(0, m_edge - gap - px(6)))
+        for text, anchor, x in ((left, "w", px(6)), (mid, "center", W // 2), (right, "e", W - px(16))):
+            if text:
+                st.create_text(x, h // 2, text=text, font=f, fill=C["dim"], anchor=anchor)
 
     # --- title / status ---------------------------------------------------
     def update_title(self):
@@ -2159,7 +3018,10 @@ class MainWindow(DarkWin):
 
     def _text(self, cv, x, y, text, font, anchor="w"):
         style = self.app.cfg["text_style"]
-        if style == "outline":
+        if is_coh(self.app) and self.app.cfg["bar_texture"] == "coh":
+            for dx, dy in ((-1, -1), (0, -1), (1, -1), (-1, 0), (1, 0), (-1, 1), (0, 1), (1, 1)):
+                cv.create_text(x + dx, y + dy, text=text, font=font, fill="#000000", anchor=anchor)
+        elif style == "outline":
             for dx, dy in ((-1, 0), (1, 0), (0, -1), (0, 1)):
                 cv.create_text(x + dx, y + dy, text=text, font=font, fill="#000000", anchor=anchor)
         elif style == "shadow":
@@ -2171,11 +3033,23 @@ class MainWindow(DarkWin):
         y = self._row_y(v, H)
         if y + rh < 0 or y > H:
             return
-        cv.create_rectangle(0, y, W, y + rh, fill=c["bar_bg_color"], width=0)
+        coh_bar = c["bar_texture"] == "coh"
+        if coh_bar:
+            rad = max(2, rh // 4)
+            rrect(cv, 0, y, W - 1, y + rh - 1, rad, fill="#000000", outline="")
+            rrect(cv, 1, y + 1, W - 2, y + rh - 2, rad - 1, fill="#464a50", outline="")
+            ins = PILL.get(("rr", rh)) or PILL.setdefault(("rr", rh), cohskin.rrect_insets(rh - 4, max(1, rad - 2)))
+            for gy, col in enumerate(coh_track(rh - 4)):
+                cv.create_line(2 + ins[gy], y + 2 + gy, W - 2 - ins[gy], y + 2 + gy, fill=col)
+        else:
+            cv.create_rectangle(0, y, W, y + rh, fill=c["bar_bg_color"], width=0)
         x0 = 0
-        if c["show_icons"]:
+        if c["show_icons"] and not coh_bar:
             x0 = rh
-            cv.create_rectangle(0, y, rh, y + rh, fill=shade(r.color, 0.42), width=0)
+            if False:
+                pass
+            else:
+                cv.create_rectangle(0, y, rh, y + rh, fill=shade(r.color, 0.42), width=0)
             if r.glyph and (r.glyph.startswith("T") or ord(r.glyph[0]) < 0xE000):
                 cv.create_text(rh // 2, y + rh // 2, text=r.glyph, font=FONTS["tiny"], fill=r.color)
             elif r.glyph:
@@ -2184,7 +3058,16 @@ class MainWindow(DarkWin):
                 letter = "\u2605" if r.kind == "player" else (r.name.strip()[:1] or "?").upper()
                 cv.create_text(rh // 2, y + rh // 2, text=letter, font=FONTS["uib"], fill=r.color)
         bw = int((W - x0) * frac)
-        if bw > 0:
+        if bw > 0 and coh_bar:
+            lines = bar_lines(r.color, rh - 4, "coh", 1.12 if hov else 1.0)
+            iw = W - 4
+            fw = max(0, int(iw * frac))
+            for gy, col in enumerate(lines):
+                xl = 2 + ins[gy]
+                xr2 = min(2 + fw, W - 2 - ins[gy])
+                if xr2 > xl:
+                    cv.create_line(xl, y + 2 + gy, xr2, y + 2 + gy, fill=col)
+        elif bw > 0:
             lines = bar_lines(r.color, rh, c["bar_texture"], 1.18 if hov else 1.0)
             if c["bar_texture"] == "flat":
                 cv.create_rectangle(x0, y, x0 + bw, y + rh, fill=lines[0], width=0)
@@ -2195,7 +3078,7 @@ class MainWindow(DarkWin):
                     cv.create_line(x0, y + gy, x0 + bw, y + gy, fill=col)
         if c["row_border"]:
             cv.create_rectangle(0, y, W - 1, y + rh - 1, outline="#000000", width=1)
-        if hov:
+        if hov and not coh_bar:
             cv.create_rectangle(x0, y, W - 1, y + rh - 1, outline="#ffffff", width=1)
         f = FONTS["row"]
         if c["aligned_cols"] and r.cols:
@@ -2207,13 +3090,13 @@ class MainWindow(DarkWin):
                 xr -= cw
         else:
             rw = f.measure(r.right)
-            self._text(cv, W - px(4), y + rh // 2, r.right, f, anchor="e")
+            self._text(cv, W - px(8 if coh_bar else 4), y + rh // 2, r.right, f, anchor="e")
         if idx is not None and c["show_rank"] and r.kind != "death":
             left = "%d. %s" % (idx + 1, r.name)
         else:
             left = r.name
         left = truncate(f, left, W - x0 - rw - px(16))
-        self._text(cv, x0 + px(4), y + rh // 2, left, f)
+        self._text(cv, x0 + px(8 if coh_bar else 4), y + rh // 2, left, f)
 
     def _total_row(self, rows, seg):
         mode = self.app.cfg["mode"]
@@ -2242,20 +3125,27 @@ class MainWindow(DarkWin):
             return
         seg = app.get_segment()
         headers = []
-        if app.log_warning():
+        demo = bool(c.get("demo_mode"))
+        if app.log_warning() and not demo:
             headers.append(Row("@warn", "Chat log isn't updating \u2014 click to fix", 1.0, "", "",
                                "#9a6a12", "header", "!"))
-        drill = self.drill if (self.drill and self.drill[0] == c["mode"]) else None
+        drill = self.drill if (not demo and self.drill and self.drill[0] == c["mode"]) else None
         rows = None
         if drill is not None:
-            bd, rows = build_drill_rows(app, seg, drill)
+            if getattr(self, "drill_procs", None) and self._procs_for != drill:
+                self.drill_procs = None
+            bd, rows = build_drill_rows(app, seg, drill, getattr(self, "drill_procs", None))
             if bd is None:
                 drill, rows = None, None
+            elif getattr(self, "drill_procs", None) and getattr(bd, "procs_open", None) != self.drill_procs:
+                self.drill_procs = None
             else:
                 back = Row("@back", "\u25c0  " + bd.title, 1.0, fmt(bd.total) if bd.total > 1 else "",
                            "", bd.color, "header", "\u25c0")
                 headers.append(back)
         self.drill = drill
+        if rows is None and demo:
+            rows = demo_rows(app)
         if rows is None:
             rows = build_rows(app, seg)
             if c["total_bar"] and rows and c["mode"] in TOTAL_MODES:
@@ -2273,8 +3163,11 @@ class MainWindow(DarkWin):
         if not rows:
             msg = app.status_message(seg)
             top_y = len(headers) * slot
-            cv.create_text(W // 2, top_y + (H - top_y) // 2, text=msg, font=FONTS["small"], fill=C["dim"],
-                           justify="center", width=W - px(16))
+            tid = cv.create_text(W // 2, top_y + (H - top_y) // 2, text=msg, font=FONTS["small"], fill=C["dim"],
+                                 justify="center", width=W - px(16))
+            bb = cv.bbox(tid)
+            if bb and bb[1] < top_y + px(4):            # too tall for the space: start just under the headers
+                cv.move(tid, 0, top_y + px(4) - bb[1])
             self.update_title()
             return
         top = max(r.value for r in rows) or 1.0
@@ -2333,7 +3226,10 @@ class MainWindow(DarkWin):
             if key == "@warn":
                 self.app.chatlog_menu(e.x_root, e.y_root)
             elif key == "@back":
-                self.drill = None
+                if getattr(self, "drill_procs", None):
+                    self.drill_procs = None
+                else:
+                    self.drill = None
                 self.scroll = 0
                 self.refresh()
             return
@@ -2345,9 +3241,17 @@ class MainWindow(DarkWin):
                 self.app.browse_game_dir()
             return
         row = self.rows[idx]
-        if self.drill:
+        if isinstance(row.key, str) and row.key.startswith("@demo:"):
+            self.app.main.flash_title("Example bars \u2014 turn them off in the right-click menu", 2.5)
+            return
+        if self.drill and is_procs_key(row.key) and not getattr(self, "drill_procs", None):
+            self.drill_procs, self._procs_for = row.key, self.drill      # open the Procs row
+            self.scroll = 0
+            self.hover = -1
+            self.refresh()
+        elif self.drill:
             # a power inside the drill-down: open the full breakdown on that power
-            self.app.open_breakdown_at(self.drill[0], self.drill[1], row.key)
+            self.app.open_breakdown_at(self.drill[0], self.drill[1], row.key, getattr(self, "drill_procs", None))
         elif row.kind == "death" or (e.state & 0x0001):
             self.app.open_breakdown(row)            # Shift+click: straight to the breakdown window
         else:
@@ -2365,6 +3269,12 @@ class MainWindow(DarkWin):
 
     def _rclick(self, e):
         self.app.use(self)
+        if getattr(self, "drill_procs", None):
+            self.drill_procs = None
+            self.scroll = 0
+            self.app.tip.hide()
+            self.refresh()
+            return
         if self.drill:
             self.drill = None
             self.scroll = 0
@@ -2417,6 +3327,8 @@ class MainWindow(DarkWin):
         if not self.is_main:
             items.append({"label": "Close this window", "cmd": self.close_meter})
         items.append({"sep": True})
+        items.append({"label": "Show example bars", "check": bool(app.cfg.get("demo_mode")),
+                      "cmd": app.toggle_demo})
         items.append({"label": "Recap Last Moments (manual)", "color": C["red"], "cmd": app.manual_recap})
         DMenu(app, x, y, items)
 
@@ -2552,6 +3464,7 @@ class Breakdown(DarkWin):
         self.scroll = 0
         self.dscroll = 0
         self.data = None
+        self.procs = None
         self.items_view = []
         self.header = tk.Canvas(self.body, height=px(62), bg=C["bg"], highlightthickness=0, bd=0)
         self.header.pack(side="top", fill="x")
@@ -2567,6 +3480,8 @@ class Breakdown(DarkWin):
         self.table.bind("<Configure>", lambda e: self.draw_table())
         self.detail.bind("<Configure>", lambda e: self.draw_detail())
         self.table.bind("<Button-1>", self._table_click)
+        self.table.bind("<Button-3>", self._table_rclick)
+        self.header.bind("<Button-3>", self._table_rclick)
         self.tabs.bind("<Button-1>", self._tab_click)
         on_wheel(self.table, self._wheel)
         on_wheel(self.detail, self._dwheel)
@@ -2578,9 +3493,13 @@ class Breakdown(DarkWin):
         self.detail.configure(width=px(300))
         self.refresh()
 
-    def open(self, mode, key):
+    def open(self, mode, key, keep_procs=False):
         if (mode, key) != (self.mode, self.key):
             self.tab, self.sel, self.scroll, self.dscroll, self.sort = 0, None, 0, 0, (0, True)
+            if not keep_procs:
+                self.procs = None
+        elif not keep_procs:
+            self.procs = None
         self.mode, self.key = mode, key
         self.refresh()
         self.lift()
@@ -2590,7 +3509,9 @@ class Breakdown(DarkWin):
             return
         app = self.app
         seg = app.get_segment()
-        self.data = build_breakdown(app, seg, self.mode, self.key)
+        self.data = build_breakdown(app, seg, self.mode, self.key, self.procs if self.tab == 0 else None)
+        if self.procs and getattr(self.data, "procs_open", None) != self.procs:
+            self.procs = None
         segname = "Overall Data" if app.seg_choice == "overall" else (
             "#%d %s" % (seg.number, seg.name) if seg else "-")
         self.title = "%s  —  %s" % (MODE_LABEL.get(self.mode, ""), segname)
@@ -2778,11 +3699,22 @@ class Breakdown(DarkWin):
             return
         for a, b, k in getattr(self, "hit_slots", []):
             if a <= e.y < b:
+                if is_procs_key(k) and self.procs is None and self.tab == 0:
+                    self.procs, self.sel, self.scroll, self.dscroll = k, None, 0, 0     # open Procs
+                    self.refresh()
+                    return
                 self.sel = k
                 self.dscroll = 0
                 self.draw_table()
                 self.draw_detail()
                 return
+
+    def _table_rclick(self, e):
+        if self.procs is not None:          # back out of Procs
+            back = self.procs
+            self.procs, self.scroll, self.dscroll = None, 0, 0
+            self.sel = back
+            self.refresh()
 
     def _wheel(self, d):
         self.scroll = max(0, self.scroll + d * 2)
@@ -3095,7 +4027,7 @@ class RecapWin(DarkWin):
             for pname, (n, amt, dt_) in sorted(info["powers"].items(), key=lambda kv: -kv[1][1])[:4]:
                 cv.create_rectangle(pad + px(10), py + px(4), pad + px(18), py + px(12), fill=dtype_color(dt_),
                                     width=0)
-                cv.create_text(pad + px(24), py + px(8), text="%s  ×%d" % (pname, n), font=fs,
+                cv.create_text(pad + px(24), py + px(8), text="%s  x%d" % (pname, n), font=fs,
                                fill=C["text"], anchor="w")
                 cv.create_text(W - pad - px(8), py + px(8), text="%s %s" % (fmt(amt), dt_ or ""), font=fs,
                                fill=C["dim"], anchor="e")
@@ -3397,13 +4329,13 @@ class BuildWin(DarkWin):
                     ("In the log", 220, "w")]
             for r in sorted(planned, key=lambda r: (r.level, r.name)):
                 sets = r.plan.sets()
-                st = ", ".join("%s%s" % (s, " \u00d7%d" % n if n > 1 else "") for s, n in
+                st = ", ".join("%s%s" % (s, " x%d" % n if n > 1 else "") for s, n in
                                sorted(sets.items(), key=lambda t: -t[1])) or ("%d slot%s" % (r.slots, "" if r.slots == 1 else "s"))
                 if r.output:
                     log = "\u2714 %s%s" % (fmt(r.output), ("  \u2022  %d uses" % r.uses) if r.uses else "")
                     lc = C.get("green", "#5bd75b")
                 elif r.uses or r.seen:
-                    log = "\u2714 used %d\u00d7" % (r.uses or r.seen)
+                    log = "\u2714 used %dx" % (r.uses or r.seen)
                     lc = C.get("green", "#5bd75b")
                 else:
                     log = "\u2014 not seen"
@@ -3563,7 +4495,7 @@ class DScroll(tk.Canvas):
 
 
 # Popular fonts (only the ones actually installed are offered)
-POPULAR_FONTS = ["Oswald", "Bahnschrift", "Bahnschrift SemiBold", "Bahnschrift Condensed",
+POPULAR_FONTS = ["Montreal-DemiBold", "Montreal-Bold", "Montreal-Heavy", "Paragon City", "Oswald", "Bahnschrift", "Bahnschrift SemiBold", "Bahnschrift Condensed",
                  "Bahnschrift SemiBold Condensed", "Segoe UI", "Segoe UI Semibold", "Segoe UI Black",
                  "Segoe UI Variable Display Semib", "Calibri", "Candara", "Corbel", "Franklin Gothic Medium",
                  "Trebuchet MS", "Verdana", "Tahoma", "Arial", "Arial Black", "Arial Narrow", "Impact",
@@ -3795,12 +4727,18 @@ class DSlider(tk.Canvas):
 class OptionsWin(DarkWin):
     """Details!-style options panel: Scale on top, categories on the left, a page on the right."""
 
+    def close(self, *_):
+        super().close()
+        if self.app.cfg.get("demo_mode"):          # example bars only while Options is open
+            self.app.toggle_demo(False)
+
     PAGES = [("Display", "page_display"), ("Log File", "page_log"), ("Combat Log", "page_combat"),
              (None, None),
-             ("Profiles", "page_profiles"), ("Skins", "page_skins"), ("Mids' Build", "page_mids"),
+             ("Profiles", "page_profiles"), ("Skins", "page_skins"), ("Window Themes", "page_wthemes"),
+             ("Window Theme Editor", "page_weditor"), ("Bar Themes", "page_themes"),
+             ("Bar Theme Editor", "page_editor"), ("Mids' Build", "page_mids"),
              (None, None),
-             ("Bars: General", "page_bars"), ("Bars: Texts", "page_texts"), ("Themes", "page_themes"),
-             ("Theme Editor", "page_editor"),
+             ("Bars: General", "page_bars"), ("Bars: Texts", "page_texts"),
              (None, None),
              ("Title Bar", "page_title"), ("Window Body", "page_body"), ("Statusbar", "page_status"),
              ("Windows & Tabs", "page_windows"), ("Automation", "page_auto"), ("Tooltips", "page_tips"),
@@ -3818,7 +4756,53 @@ class OptionsWin(DarkWin):
         self.build()
 
     # ------------------------------------------------------------------ frame
+    def _cover(self):
+        """Lay a still picture of the page over it while it's rebuilt underneath, then lift it off
+        once the new page is drawn at the same scroll spot -- the change just appears, nothing jumps."""
+        if getattr(self, "_covered", None) is not None:
+            return
+        try:
+            t = self.top
+            if not (t.winfo_ismapped() and t.state() == "normal" and self.body.winfo_children()):
+                return
+            from PIL import ImageGrab, ImageTk
+            b = self.body
+            x, y, w, h = b.winfo_rootx(), b.winfo_rooty(), b.winfo_width(), b.winfo_height()
+            if w < 20 or h < 20:
+                return
+            ph = ImageTk.PhotoImage(ImageGrab.grab((x, y, x + w, y + h), all_screens=True))
+            lab = tk.Label(t, image=ph, bd=0, highlightthickness=0, padx=0, pady=0)
+            lab.image = ph
+            lab.place(in_=b, x=0, y=0, width=w, height=h)
+            tk.Misc.lift(lab)
+            lab.update_idletasks()
+            self._covered = lab
+        except Exception:
+            self._covered = None
+
+    def _uncover(self):
+        lab = getattr(self, "_covered", None)
+        if lab is None:
+            return
+
+        def off():
+            self._covered = None
+            try:
+                lab.destroy()
+            except Exception:
+                pass
+        try:
+            self.top.update_idletasks()
+        except Exception:
+            pass
+        self.top.after(40, off)          # after the last scroll fix-up has been painted
+
     def build(self):
+        self._cover()
+        try:                    # remember where you were scrolled, so a rebuild doesn't jump to the top
+            self._keep_scroll = (self.page, self.sc.yview()[0])
+        except Exception:
+            self._keep_scroll = None
         for w in self.body.winfo_children():
             w.destroy()
         self.pagef = None
@@ -3851,8 +4835,23 @@ class OptionsWin(DarkWin):
         self.sc.configure(yscrollcommand=self.sb.set, yscrollincrement=px(24))
         self.show_page(self.page if hasattr(self, self.page) else "page_display")
         tk.Misc.lift(self.grip)
+        self._uncover()
 
     def show_page(self, page):
+        # redrawing the same page (e.g. after clicking a preset) keeps your place instead of jumping to the top
+        keep = None
+        if page == getattr(self, "page", None) and getattr(self, "pagef", None) is not None:
+            try:
+                keep = self.sc.yview()[0]
+            except Exception:
+                keep = None
+        ks = getattr(self, "_keep_scroll", None)
+        if keep is None and ks and ks[0] == page:
+            keep = ks[1]
+        own = keep is not None and getattr(self, "_covered", None) is None
+        if own:
+            self._cover()
+        self._keep_scroll = None
         self.page = page
         self.app.cfg["opt_page"] = page
         for p, b in self.nav_btns.items():
@@ -3872,7 +4871,12 @@ class OptionsWin(DarkWin):
         getattr(self, page)()
         f.update_idletasks()
         self._relayout()
-        self.sc.yview_moveto(0)
+        if keep:
+            self.sc.configure(scrollregion=self.sc.bbox("all"))
+            self.sc.yview_moveto(keep)
+            self.sc.after_idle(lambda: self.sc.yview_moveto(keep))     # again once the layout settles
+        else:
+            self.sc.yview_moveto(0)
 
         def wheel(e):
             self.sc.yview_scroll(-1 if e.delta > 0 else 1, "units")
@@ -3884,6 +4888,8 @@ class OptionsWin(DarkWin):
                 bind_tree(c)
         bind_tree(f)
         self.sc.bind("<MouseWheel>", wheel)
+        if own:
+            self._uncover()
 
     def _relayout(self, width=None):
         """Two columns side by side when they fit, otherwise stacked."""
@@ -4052,8 +5058,7 @@ class OptionsWin(DarkWin):
         self.slider(0, "row_height", "Bar height", 14, 40)
         self.slider(0, "row_spacing", "Spacing", 0, 8)
         self.dropdown(0, "grow_up", "Bar growth direction", [(False, "Top to bottom"), (True, "Bottom to top")])
-        self.dropdown(0, "bar_texture", "Texture",
-                      BAR_STYLES)
+        self.dropdown(0, "bar_texture", "Bar shape", BAR_STYLES)
         self.check(0, "show_icons", "Show icons")
         self.check(0, "row_border", "Thin border around bars")
         self.check(0, "total_bar", "Show a Total bar at the top")
@@ -4067,27 +5072,30 @@ class OptionsWin(DarkWin):
 
     def page_themes(self):
         a = self.app
-        self.section(0, "Themes")
-        self.note(0, "Click a theme to apply it. Want your own? Open the Theme Editor to change every color "
-                     "and save it as a new theme.")
+        self.section(0, "Bar Themes")
+        self.check(0, "demo_mode", "Show example bars in the meter (to try looks without a fight)",
+                   after=lambda: self.app.toggle_demo(self.app.cfg.get("demo_mode")))
+        self.note(0, "Bar themes only color the bars (you, pet tiers, pets, enemies). The windows come from "
+                     "your skin, and the bar shape is picked separately.")
         eb = tk.Frame(self.cols[0], bg=C["bg"])
         eb.pack(fill="x", pady=px(4))
-        self.button(eb, "Edit current theme", lambda: self._edit_load(a.cfg.get("theme", "minimal"))).pack(side="left")
+        self.button(eb, "Edit current bar theme",
+                    lambda: self._edit_load(a.cfg.get("bar_theme", "minimal"))).pack(side="left")
         grid = tk.Frame(self.cols[0], bg=C["bg"])
         grid.pack(fill="x", pady=px(4))
         for i, (key, t) in enumerate([(k, v) for k, v in THEMES.items() if not k.startswith("__")]):
-            on = a.cfg.get("theme", "minimal") == key
+            on = a.cfg.get("bar_theme", "minimal") == key
             cw, ch = px(250), px(96)
-            card = tk.Canvas(grid, width=cw, height=ch, bg=t["C"].get("bg", BASE_C["bg"]), highlightthickness=2,
+            card = tk.Canvas(grid, width=cw, height=ch, bg=C["bg"], highlightthickness=2,
                              highlightbackground=C["gold"] if on else C["sep"], cursor="hand2", bd=0)
             card.grid(row=i // 2, column=i % 2, padx=px(5), pady=px(5))
             self._draw_theme_card(card, t, cw, ch, on)
             card.bind("<Button-1>", lambda e, k=key: a.root.after(10, lambda: a.set_theme(k)))
-        self.section(1, "Bar Style")
-        self.dropdown(1, "bar_texture", "Bar style", BAR_STYLES)
+        self.section(1, "Bar Shape")
+        self.dropdown(1, "bar_texture", "Bar shape", BAR_STYLES)
         self.check(1, "row_border", "Thin border around bars")
         self.slider(1, "row_spacing", "Spacing", 0, 8)
-        self.note(1, "Picking a theme also sets its matching bar style; change it here any time.")
+        self.note(1, "Shape and colors are separate: any bar theme works with any shape.")
 
     # ---------------------------------------------------------------- theme editor
     THEME_FIELDS = [
@@ -4138,10 +5146,10 @@ class OptionsWin(DarkWin):
     def page_editor(self):
         a = self.app
         if getattr(self, "edit", None) is None:
-            self._edit_load_quiet(a.cfg.get("theme", "minimal"))
+            self._edit_load_quiet(a.cfg.get("bar_theme", "minimal"))
         e = self.edit
         c0 = self.cols[0]
-        self.section(0, "Theme Editor")
+        self.section(0, "Bar Theme Editor")
         self.note(0, "Start from any theme, change any color, then Apply to try it or Save it as your own.")
         self.dropdown(0, None, "Start from",
                       [(k, t["label"]) for k, t in THEMES.items() if not k.startswith("__")],
@@ -4170,8 +5178,7 @@ class OptionsWin(DarkWin):
         self.button(btns2, "Import (paste)", self._edit_import).pack(side="left", padx=px(6))
 
         self.section(0, "Bars")
-        self.dropdown(0, None, "Bar style", BAR_STYLES, getter=lambda: e["texture"],
-                      setter=lambda v: (e.__setitem__("texture", v), self._draw_preview()))
+
         for text, get, set_ in (
                 ("Your bar", lambda: e["player"], lambda v: e.__setitem__("player", v)),
                 ("Tier 3 (strongest)", lambda: e["tiers"][3], lambda v: e["tiers"].__setitem__(3, v)),
@@ -4186,11 +5193,10 @@ class OptionsWin(DarkWin):
             w = self._swatch(grid, "", lambda i=i: e["pets"][i], lambda v, i=i: e["pets"].__setitem__(i, v), True)
             w.grid(row=i // 6, column=i % 6, padx=px(2), pady=px(2))
 
-        for title, fields in self.THEME_FIELDS:
-            self.section(1, title)
-            for key, text in fields:
-                self._swatch(self.cols[1], text, lambda k=key: e["C"][k],
-                             lambda v, k=key: e["C"].__setitem__(k, v)).pack(fill="x", pady=px(2))
+        self.section(1, "How it fits together")
+        self.note(1, "Bar themes only color the bars, so they work with every skin and window theme. "
+                     "The preview uses your current skin and bar shape.")
+        self.note(1, "Bar shape: \u2699 \u2192 Bar Themes \u2192 Bar Shape.  Window colors: Window Themes.")
 
     def _edit_load_quiet(self, key):
         self.edit = theme_copy(THEMES.get(key) or THEMES["minimal"])
@@ -4229,7 +5235,7 @@ class OptionsWin(DarkWin):
         a.cfg.setdefault("custom_themes", {}).pop(key, None)
         THEMES.pop(key, None)
         self._edit_load_quiet("minimal")
-        if a.cfg.get("theme") == key:
+        if a.cfg.get("bar_theme") == key:
             a.root.after(10, lambda: a.set_theme("minimal"))
         else:
             a.save_cfg()
@@ -4261,8 +5267,8 @@ class OptionsWin(DarkWin):
         a.main.flash_title("Theme imported \u2014 Save it to keep it", 3)
 
     def _draw_theme_card(self, cv, t, w, h, on):
-        tc = dict(BASE_C)
-        tc.update(t["C"])
+        tc = dict(C)
+        t = dict(t, texture=self.app.cfg.get("bar_texture", "gloss"))
         th = px(20)
         cv.create_rectangle(0, 0, w, th, fill=tc["title"], width=0)
         cv.create_text(px(8), th // 2, text=t["label"], font=FONTS["uib"], fill=tc["text"], anchor="w")
@@ -4271,7 +5277,7 @@ class OptionsWin(DarkWin):
         rh = px(20)
         y = th + px(4)
         for name, color, frac in (("You", t["player"], 1.0), ("Lich", t["tiers"][3], 0.78),
-                                  ("Zombie \u00d73", t["pets"][0], 0.55)):
+                                  ("Zombie x3", t["pets"][0], 0.55)):
             cv.create_rectangle(px(4), y, w - px(4), y + rh, fill=tc["bar_bg"], width=0)
             bw = int((w - px(8)) * frac)
             lines = bar_lines(color, rh, t["texture"])
@@ -4425,39 +5431,231 @@ class OptionsWin(DarkWin):
 
     def page_skins(self):
         a = self.app
-        self.section(0, "Skins")
-        self.note(0, "A skin is the meter's shape: bar size, fonts, text style, title bar and statusbar. "
-                     "Colors come from your theme.")
+        c = a.cfg
+        self.section(0, "Skin")
+        self.check(0, "demo_mode", "Show example bars in the meter (to try looks without a fight)",
+                   after=lambda: self.app.toggle_demo(self.app.cfg.get("demo_mode")))
+        self.note(0, "A skin is the shape and style of every Hero Meter window: frames, title bars, tabs, menus "
+                     "and fonts. Colors come from Window Themes and Bar Themes, which work with every skin.")
         grid = tk.Frame(self.cols[0], bg=C["bg"])
         grid.pack(fill="x", pady=px(4))
-        cur = a.cfg.get("skin")
-        for i, (key, sk) in enumerate(a.all_skins().items()):
-            on = key == cur
-            cw, ch = px(250), px(110)
-            card = tk.Canvas(grid, width=cw, height=ch, bg=a.cfg["body_bg"], highlightthickness=2,
+        for i, key in enumerate(WINDOW_SKINS):
+            on = c.get("skin") == key
+            cw, ch = px(192), px(100)
+            card = tk.Canvas(grid, width=cw, height=ch, bg=C["bg"], highlightthickness=2,
                              highlightbackground=C["gold"] if on else C["sep"], cursor="hand2", bd=0)
-            card.grid(row=i // 2, column=i % 2, padx=px(5), pady=px(5))
+            card.grid(row=0, column=i, padx=px(5), pady=px(5))
+            self._draw_look_card(card, key, c.get("window_theme", "coh"), cw, ch, on, WINDOW_SKINS[key]["label"])
+            card.bind("<Button-1>", lambda e, k=key: a.root.after(10, lambda: a.set_skin(k)))
+        self.section(1, "Layout Presets")
+        self.note(1, "Sizes and fonts only. Click one to apply it.")
+        lg = tk.Frame(self.cols[1], bg=C["bg"])
+        lg.pack(fill="x", pady=px(4))
+        curl = c.get("layout")
+        for i, (key, sk) in enumerate(a.all_skins().items()):
+            on = key == curl
+            cw, ch = px(170), px(84)
+            card = tk.Canvas(lg, width=cw, height=ch, bg=C["bg"], highlightthickness=2,
+                             highlightbackground=C["gold"] if on else C["sep"], cursor="hand2", bd=0)
+            card.grid(row=i // 2, column=i % 2, padx=px(4), pady=px(4))
             self._draw_skin_card(card, sk, cw, ch, on)
             card.bind("<Button-1>", lambda e, k=key: a.root.after(10, lambda: a.apply_skin(k)))
             if key.startswith("custom:"):
                 card.bind("<Button-3>", lambda e, k=key: DMenu(a, e.x_root, e.y_root, [
-                    {"label": "Delete this skin", "color": C["red"],
+                    {"label": "Delete this layout", "color": C["red"],
                      "cmd": lambda: (a.delete_skin(k), self.show_page("page_skins"))}]))
-        self.section(1, "Your Own Skin")
-        self.note(1, "Tweak sizes and fonts on the Bars, Texts and Title Bar pages, then save the look here.")
         row = tk.Frame(self.cols[1], bg=C["bg"])
         row.pack(fill="x", pady=px(3))
-        ent = self._entry(row, width=20)
+        ent = self._entry(row, width=16)
         ent.pack(side="left")
 
         def save():
             if a.save_skin_as(ent.get()):
-                a.main.flash_title("Skin saved", 2)
+                a.main.flash_title("Layout saved", 2)
                 self.show_page("page_skins")
             else:
-                a.main.flash_title("Type a name for the skin first", 2.5)
-        self.button(row, "Save current look", save).pack(side="left", padx=px(6))
-        self.note(1, "Right-click one of your skins to delete it.")
+                a.main.flash_title("Type a name for the layout first", 2.5)
+        self.button(row, "Save current layout", save).pack(side="left", padx=px(6))
+
+    def _draw_look_card(self, cv, skin, wtheme, w, h, on, title, border=None):
+        """A small picture of a window in a given skin + window theme, with the current bar colors."""
+        a = self.app
+        t = WINDOW_THEMES.get(wtheme) or WINDOW_THEMES["coh"]
+        rgb = tuple(border or (a.coh_rgb() if wtheme == a.cfg.get("window_theme") else t["border"]))
+        bars = [PLAYER_COLOR, TIER_COLORS.get(3, "#a335ee"), PET_COLORS[0]]
+        if skin == "coh":
+            try:
+                from PIL import ImageTk
+                img = cohframe.preview(w, h, rgb, [hex2rgb(c) for c in bars],
+                                       next((f for f in getattr(a, "_coh_font_files", []) if "demibold" in f.lower()),
+                                            None), scale=max(0.3, coh_scale(a) * 0.45), check=on, title=title)
+                cv._img = ImageTk.PhotoImage(img, master=a.root)
+                cv.configure(bg="#0a0a0c")
+                cv.create_image(0, 0, image=cv._img, anchor="nw")
+                return
+            except Exception:
+                pass
+        pal = skin_palette("details", wtheme, rgb if wtheme == a.cfg.get("window_theme") and
+                           a.cfg.get("match_game_color", True) else None)
+        cv.configure(bg="#0a0a0c")
+        cv.create_rectangle(2, 2, w - 3, h - 3, fill=pal["bg"], outline=pal["border"])
+        th = px(18)
+        cv.create_rectangle(3, 3, w - 3, th, fill=pal["title"], width=0)
+        cv.create_text(px(8), th // 2 + 1, text=title, font=FONTS["uib"], fill=pal["text"], anchor="w")
+        if on:
+            cv.create_text(w - px(8), th // 2 + 1, text="\u2714", font=FONTS["uib"], fill=pal["gold"], anchor="e")
+        y = th + px(8)
+        rh = max(px(12), (h - th - px(20)) // 3)
+        for col, frac in zip(bars, (0.95, 0.7, 0.45)):
+            bw = int((w - px(20)) * frac)
+            cv.create_rectangle(px(10), y, w - px(10), y + rh, fill=pal["bar_bg"], width=0)
+            for gy, lc in enumerate(bar_lines(col, rh, "gloss")):
+                cv.create_line(px(10), y + gy, px(10) + bw, y + gy, fill=lc)
+            y += rh + px(3)
+
+    # ---------------------------------------------------------------- window themes
+    def page_wthemes(self):
+        a = self.app
+        c = a.cfg
+        self.section(0, "Window Themes")
+        self.check(0, "demo_mode", "Show example bars in the meter (to try looks without a fight)",
+                   after=lambda: self.app.toggle_demo(self.app.cfg.get("demo_mode")))
+        self.note(0, "Window themes are the colors of the windows. Every theme works with every skin. Picking a theme uses its color, so matching the game's color switches off.")
+        self.check(0, "match_game_color", "Match the game's window color",
+                   after=lambda: (a.set_match_color(a.cfg.get("match_game_color")),
+                                  a.root.after(50, lambda: self.show_page("page_wthemes"))))
+        if c.get("match_game_color", True):
+            ch_ = a.build_char()
+            cur = (c.get("char_colors") or {}).get(ch_)
+            how = "picked by you" if ch_ in (c.get("char_picked") or {}) else "read automatically"
+            self.note(0, ("%s: Red %d%%  Green %d%%  Blue %d%%  (%s)" % ((ch_,) + tuple(cur) + (how,))) if cur else
+                      "Read from your game windows when you log in. For an exact match every time, use "
+                      "Pick it from a game window and click the border of any game window. It's remembered "
+                      "for each character.")
+            row = tk.Frame(self.cols[0], bg=C["bg"])
+            row.pack(fill="x", pady=px(3))
+            self.button(row, "Pick it from a game window", a.pick_game_color).pack(side="left")
+            self.button(row, "Read it automatically", lambda: a.coh_detect_soon(4, True)).pack(side="left", padx=(px(6), 0))
+        eb = tk.Frame(self.cols[0], bg=C["bg"])
+        eb.pack(fill="x", pady=px(4))
+        self.button(eb, "Edit current window theme",
+                    lambda: self._wedit_load(c.get("window_theme", "coh"))).pack(side="left")
+        grid = tk.Frame(self.cols[0], bg=C["bg"])
+        grid.pack(fill="x", pady=px(4))
+        skin = c.get("skin", "coh")
+        for i, (key, t) in enumerate([(k, v) for k, v in WINDOW_THEMES.items() if not k.startswith("__")]):
+            on = c.get("window_theme", "coh") == key
+            cw, ch = px(186), px(92)
+            card = tk.Canvas(grid, width=cw, height=ch, bg=C["bg"], highlightthickness=2,
+                             highlightbackground=C["gold"] if on else C["sep"], cursor="hand2", bd=0)
+            card.grid(row=i // 2, column=i % 2, padx=px(5), pady=px(5))
+            self._draw_look_card(card, skin, key, cw, ch, on, t["label"], border=t["border"])
+            card.bind("<Button-1>", lambda e, k=key: a.root.after(10, lambda: a.set_window_theme(k)))
+
+    def _wedit_load(self, key):
+        self.wedit = wtheme_copy(WINDOW_THEMES.get(key) or WINDOW_THEMES["coh"])
+        self.wedit_key = key
+        self.show_page("page_weditor")
+
+    def _wdraw_preview(self):
+        cv = getattr(self, "_wpreview", None)
+        if cv is None or not cv.winfo_exists():
+            return
+        cv.delete("all")
+        WINDOW_THEMES["__preview"] = self.wedit
+        try:
+            self._draw_look_card(cv, self.app.cfg.get("skin", "coh"), "__preview", int(cv.cget("width")),
+                                 int(cv.cget("height")), False, self.wedit["label"], border=self.wedit["border"])
+        finally:
+            WINDOW_THEMES.pop("__preview", None)
+
+    def page_weditor(self):
+        a = self.app
+        if getattr(self, "wedit", None) is None:
+            self.wedit = wtheme_copy(WINDOW_THEMES.get(a.cfg.get("window_theme", "coh")) or WINDOW_THEMES["coh"])
+            self.wedit_key = a.cfg.get("window_theme", "coh")
+        e = self.wedit
+        c0 = self.cols[0]
+        self.section(0, "Window Theme Editor")
+        self.note(0, "Start from any window theme, change its colors, then Apply to try it or Save it as your own.")
+        self.dropdown(0, None, "Start from", [(k, t["label"]) for k, t in WINDOW_THEMES.items()
+                                              if not k.startswith("__")],
+                      getter=lambda: self.wedit_key, setter=self._wedit_load)
+        row = tk.Frame(c0, bg=C["bg"])
+        row.pack(fill="x", pady=px(4))
+        tk.Label(row, text="Theme name", bg=C["bg"], fg=C["text"], font=FONTS["ui"], width=20, anchor="w").pack(
+            side="left")
+        self._wname = tk.Entry(row, bg=C["menu_bg"], fg=C["text"], insertbackground=C["text"], relief="flat",
+                               font=FONTS["ui"], width=24)
+        self._wname.insert(0, e["label"] if self.wedit_key.startswith("custom:") else "My " + e["label"])
+        self._wname.pack(side="left")
+        self._wpreview = tk.Canvas(c0, width=px(260), height=px(120), bg="#0a0a0c", highlightthickness=1,
+                                   highlightbackground=C["sep"], bd=0)
+        self._wpreview.pack(anchor="w", pady=px(6))
+        self._wdraw_preview()
+        btns = tk.Frame(c0, bg=C["bg"])
+        btns.pack(fill="x", pady=px(2))
+        self.button(btns, "Apply (try it)", self._wedit_apply).pack(side="left")
+        self.button(btns, "Save as theme", self._wedit_save).pack(side="left", padx=px(6))
+        if self.wedit_key.startswith("custom:"):
+            self.button(btns, "Delete", self._wedit_delete).pack(side="left")
+        self.section(0, "Window Border")
+        self.note(0, "The frame color in every skin. (With \u201cMatch the game's window color\u201d on, the "
+                     "game's color is used instead.)")
+
+        def get_b():
+            return cohskin._hex(*e["border"])
+
+        def set_b(v):
+            e["border"] = hex2rgb(v)
+            self._wdraw_preview()
+        self._swatch(c0, "Border color", get_b, set_b).pack(fill="x", pady=px(2))
+        for title, fields in self.THEME_FIELDS:
+            self.section(1, title)
+            for key, text in fields:
+                if key == "border":
+                    continue
+                self._swatch(self.cols[1], text, lambda k=key: e["C"].get(k, BASE_C.get(k, "#000000")),
+                             lambda v, k=key: (e["C"].__setitem__(k, v), self._wdraw_preview())).pack(
+                    fill="x", pady=px(2))
+        self.note(1, "Window, text and panel colors are used by the Details! skin; accents and menus by both.")
+
+    def _wedit_apply(self):
+        a = self.app
+        t = wtheme_copy(self.wedit)
+        t["label"] = self._wname.get().strip() or "Custom (unsaved)"
+        WINDOW_THEMES["__editing"] = t
+        a.cfg.setdefault("custom_window_themes", {})
+        a.root.after(10, lambda: a.set_window_theme("__editing"))
+
+    def _wedit_save(self):
+        a = self.app
+        name = self._wname.get().strip()
+        if not name:
+            a.main.flash_title("Give your theme a name first", 2.5)
+            return
+        key = "custom:" + (re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-") or "theme")
+        t = wtheme_copy(self.wedit)
+        t["label"] = name
+        self.wedit["label"] = name
+        a.cfg.setdefault("custom_window_themes", {})[key] = wtheme_serialize(t)
+        WINDOW_THEMES.pop("__editing", None)
+        WINDOW_THEMES[key] = t
+        self.wedit_key = key
+        a.root.after(10, lambda: a.set_window_theme(key))
+
+    def _wedit_delete(self):
+        a = self.app
+        key = self.wedit_key
+        a.cfg.setdefault("custom_window_themes", {}).pop(key, None)
+        WINDOW_THEMES.pop(key, None)
+        self.wedit = wtheme_copy(WINDOW_THEMES["coh"])
+        self.wedit_key = "coh"
+        if a.cfg.get("window_theme") == key:
+            a.root.after(10, lambda: a.set_window_theme("coh"))
+        else:
+            a.save_cfg()
+            self.show_page("page_weditor")
 
     def _draw_skin_card(self, cv, sk, w, h, on):
         c = self.app.cfg
@@ -4475,7 +5673,7 @@ class OptionsWin(DarkWin):
         sb = px(12) if sk["statusbar"] else 0
         y = top + px(2)
         rows = [("You", PLAYER_COLOR, 1.0, "52.1K"), ("Lich", TIER_COLORS.get(3, "#a0a0a0"), 0.72, "37.6K"),
-                ("Zombie \u00d73", PET_COLORS[0], 0.45, "23.4K"), ("Grave Knight", PET_COLORS[1], 0.3, "15.7K")]
+                ("Zombie x3", PET_COLORS[0], 0.45, "23.4K"), ("Grave Knight", PET_COLORS[1], 0.3, "15.7K")]
         if sk["total_bar"]:
             rows.insert(0, ("Total", "#6b6874", 1.0, "128.8K"))
         avail = h - th - sb - px(4)
@@ -4672,11 +5870,20 @@ class App:
         self.cfg = dict(DEFAULTS)
         self.load_cfg()
         load_custom_themes(self.cfg.get("custom_themes"))
-        apply_theme_palette(self.cfg.get("theme", "minimal"))
+        load_window_themes(self.cfg.get("custom_window_themes"))
+        apply_look(self.cfg.get("skin", "coh"), self.cfg.get("window_theme", "coh"), self.cfg.get("bar_theme", "minimal"),
+                   self.coh_rgb())
         self._primary_dpi = max(1.0, self.root.winfo_fpixels("1i") / 96.0)
         self._dpi = self.initial_dpi()
         S = self.effective_scale()
         Fmt.abbreviate = self.cfg["abbreviate"]
+        self._coh_font_files = []
+        try:        # the game's own fonts, unpacked once from the player's install
+            self._coh_font_files = cohassets.extract_coh_fonts(self.game_root(), os.path.join(DATA_DIR, "cohfonts"))
+            for fpath in self._coh_font_files:
+                win_load_font(fpath)
+        except Exception:
+            pass
         self._user_fams = load_user_fonts(self.root)
         fams = set(tkfont.families(self.root))
         row_fam = "Oswald" if (font_ok and "Oswald" in fams) else "Segoe UI Semibold"
@@ -4697,7 +5904,10 @@ class App:
         FONTS["tip"] = tkfont.Font(self.root, family="Segoe UI", size=-px(13))
         self._fams = fams
         self._oswald_ok = bool(font_ok and "Oswald" in fams)
+        self._coh_ok = "Montreal-DemiBold" in fams and "Montreal-Bold" in fams
+        self._row_fam_default = row_fam
 
+        self.root.report_callback_exception = lambda et, ev, tb: log_error("callback", et, ev, tb)
         self.parser = cp.Parser(self.cfg["combat_timeout"], self.cfg["max_segments"], self.cfg["recap_window"])
         self.parser.typer.known.update(self.cfg.get("pet_types") or {})
         self.apply_cfg_all()
@@ -4741,6 +5951,9 @@ class App:
         self._menu_since = None
         self.root.after(1200, self.watch_login)
         self.root.after(5000, self.check_updates)
+        self.root.after(4000, lambda: self.coh_detect_soon(8))
+        if getattr(self, "_fresh_coh", False):      # first run on the new look: switch fonts + bar shape too
+            self.root.after(300, lambda: self.set_skin("coh"))
 
     # --- multiple meter windows ---------------------------------------------
     @property
@@ -4821,6 +6034,7 @@ class App:
 
     # --- config ----------------------------------------------------------
     def load_cfg(self):
+        self._fresh_coh = True              # stays True for a brand-new install with no settings yet
         path = CONFIG_PATH
         if not os.path.isfile(path):
             for old in OLD_CONFIG_PATHS:     # first run after a rename: bring the old settings along
@@ -4833,8 +6047,44 @@ class App:
             for k, v in data.items():
                 if k in DEFAULTS:
                     self.cfg[k] = v
+            self._fresh_coh = self._migrate_look(self.cfg, data) or "look_version" not in data
+            self.cfg["demo_mode"] = False
+            if data.get("color_reader") != 3:       # colors saved by an older, easily fooled reader: read again
+                picked = self.cfg.get("char_picked") or {}
+                self.cfg["char_colors"] = {k: v for k, v in (self.cfg.get("char_colors") or {}).items() if k in picked}
+                self.cfg["coh_last"] = None
+                self.cfg["color_reader"] = 3
+            for snap in (self.cfg.get("profiles") or {}).values():
+                if isinstance(snap, dict):
+                    self._migrate_look(snap, snap)
         except Exception:
             pass
+
+    @staticmethod
+    def _migrate_look(target, data):
+        if "bar_theme" not in data:
+            target["bar_theme"] = data.get("theme") or "minimal"
+        old = data.get("skin")
+        if old in SKINS and "layout" not in data:
+            target["layout"] = old
+        fresh = False
+        sk = target.get("skin")
+        if isinstance(sk, str) and sk.startswith("win:"):            # beta.2 test builds: color skins
+            target["skin"] = "details"
+            target.setdefault("window_theme", sk[4:])
+        elif sk not in WINDOW_SKINS:
+            target["skin"] = "coh"
+            fresh = True
+        if "window_theme" not in data:
+            target["window_theme"] = target.get("window_theme") or "coh"
+        if data.get("coh_color_mode") == "manual" and "match_game_color" not in data:
+            pct = data.get("coh_manual") or (80, 94, 100)      # keep their hand-picked color as a theme
+            store = target.setdefault("custom_window_themes", {})
+            store["custom:my-color"] = {"label": "My Color", "border": list(cohskin.pct_to_rgb(pct)),
+                                        "C": dict(THEMES["hero"]["C"])}
+            target["window_theme"] = "custom:my-color"
+            target["match_game_color"] = False
+        return fresh
 
     def save_cfg(self):
         if getattr(self, "main", None) is not None:
@@ -4876,6 +6126,29 @@ class App:
         if "title" in FONTS:
             FONTS["title"].configure(size=-px(FONT_BASE["title"]))
             FONTS["tip"].configure(size=-px(FONT_BASE["tip"]))
+        if "ui" in FONTS:
+            skin_coh = c.get("skin") == "coh"
+            coh = skin_coh and getattr(self, "_coh_ok", False)
+            base = getattr(self, "_row_fam_default", "Segoe UI Semibold")
+            if coh:
+                fr, fb, fh, fhead = "Montreal-DemiBold", "Montreal-Bold", "Montreal-Heavy", "Paragon City"
+            elif skin_coh:      # the game's fonts aren't readable yet: the closest Windows look-alike
+                sb = COH_STANDIN
+                fr, fb, fh, fhead = sb, COH_STANDIN_BOLD, COH_STANDIN_BOLD, COH_STANDIN_BOLD
+            else:
+                fr = fb = fh = fhead = None
+            FONTS["ui"].configure(family=fr or "Segoe UI")
+            FONTS["uib"].configure(family=fb or "Segoe UI Semibold")
+            FONTS["small"].configure(family=fr or "Segoe UI")
+            FONTS["tiny"].configure(family=fb or "Segoe UI Semibold")
+            FONTS["tip"].configure(family=fr or "Segoe UI")
+            FONTS["head"].configure(family=fb or base)
+            FONTS["big"].configure(family=fh or base)
+            FONTS["head_big"].configure(family=fhead or base, slant="italic" if skin_coh else "roman")
+            if skin_coh:
+                sc = coh_scale(self)
+                FONTS["title"].configure(family=fr, size=-max(10, int(round(31 * sc))))
+                FONTS["title_small"].configure(family=fr, size=-max(9, int(round(22 * sc))))
         _GRAD.clear()
 
     def set_cfg(self, key, value):
@@ -4911,36 +6184,244 @@ class App:
         self.redraw(force=True, breakdown=True)
 
     def set_theme(self, name):
+        """Bar theme: only the colors of the bars."""
         if name not in THEMES:
             return
-        old = apply_theme_palette(name)
-        t = THEMES[name]
+        self.cfg["bar_theme"] = name
+        if not self.cfg["self_color_on"]:
+            self.cfg["self_color"] = THEMES[name]["player"]
+        self.reapply_all()
+        self.save_cfg()
+        self.main.flash_title("Bar theme: " + THEMES[name]["label"], 2)
+
+    def set_skin(self, key):
+        """Window skin: the shape and style of every window (City of Heroes or Details!)."""
+        if key not in WINDOW_SKINS:
+            return
         c = self.cfg
-        c["theme"] = name
-        c["body_bg"], c["border_color"], c["bar_bg_color"] = C["bg"], C["border"], C["bar_bg"]
-        c["bar_texture"] = t["texture"]
-        if not c["self_color_on"]:
-            c["self_color"] = PLAYER_COLOR
-        mapping = {}
-        for k, v in old.items():
-            if k in C and v.lower() != C[k].lower():
-                mapping.setdefault(v.lower(), C[k])
+        c["skin"] = key
+        if key == "coh":
+            if c.get("row_font") in STANDIN_ROW_FONTS + ("Montreal-Bold",):
+                c["row_font"] = "Montreal-DemiBold" if getattr(self, "_coh_ok", False) else COH_STANDIN
+            c["bar_texture"] = "coh"
+            # sized like the game's own windows (players can change these)
+            c["row_height"], c["font_size"], c["row_spacing"] = 29, 18, 3
+        else:
+            if c.get("row_font", "").startswith("Montreal") or c.get("row_font") == COH_STANDIN:
+                c["row_font"] = "Oswald"
+            if c.get("bar_texture") == "coh":
+                c["bar_texture"] = "gloss"
+            c["row_height"], c["font_size"], c["row_spacing"] = 21, 15, 1
+        self.reapply_all()
+        self.save_cfg()
+        self.main.flash_title("Skin: " + WINDOW_SKINS[key]["label"], 2)
+
+    def set_window_theme(self, key):
+        """Window theme: the colors of the windows (works with every skin). Picking one uses its color,
+        so matching the game's window color is switched off (it can be turned back on any time)."""
+        if key not in WINDOW_THEMES:
+            return
+        self.cfg["window_theme"] = key
+        was_matching = bool(self.cfg.get("match_game_color", True))
+        self.cfg["match_game_color"] = False
+        self.reapply_all()
+        self.save_cfg()
+        self.main.flash_title("Window theme: " + WINDOW_THEMES[key]["label"] +
+                              ("  (game color matching off)" if was_matching else ""), 3)
+
+    def toggle_demo(self, on=None):
+        self.cfg["demo_mode"] = (not self.cfg.get("demo_mode")) if on is None else bool(on)
+        for m in list(getattr(self, "meters", [self.main])):
+            m.drill = None
+            m.drill_procs = None
+            m.scroll = 0
+        self.redraw(force=True)
+        self.main.flash_title("Example bars " + ("on" if self.cfg["demo_mode"] else "off"), 2)
+
+    def pick_game_color(self):
+        """Eyedropper: you click a game window's border and that exact color is used (and remembered
+        for this character, so it's applied every time you log in on them)."""
+        hwnd, _t = find_game_window()
+        u = ctypes.windll.user32
+        if not hwnd or u.IsIconic(ctypes.c_void_p(hwnd)):
+            self.main.flash_title("Open City of Heroes first", 3)
+            return
+        r = _RECT()
+        u.GetWindowRect(ctypes.c_void_p(hwnd), ctypes.byref(r))
+        rect = (r.left, r.top, r.right, r.bottom)
+        try:
+            img = cohskin.capture(rect)
+        except Exception:
+            self.main.flash_title("Couldn't see the game window", 3)
+            return
+
+        def done(col):
+            if col is None:
+                return
+            pct = list(cohskin.rgb_to_pct(col))
+            c = self.cfg
+            char = self.build_char()
+            if char and char != "You":
+                c.setdefault("char_colors", {})[char] = pct
+                c.setdefault("char_picked", {})[char] = True
+            c["coh_last"] = pct
+            c["match_game_color"] = True
+            self._coh_tries = 0
+            self.save_cfg()
+            self.reapply_all()
+            self.main.flash_title("Window color picked: %d / %d / %d %%" % tuple(pct), 4)
+        ColorPicker(self, rect, img, done)
+
+    def set_match_color(self, on):
+        self.cfg["match_game_color"] = bool(on)
+        self.reapply_all()
+        self.save_cfg()
+        if on:
+            self.coh_detect_soon(4, True)
+
+    # --- City of Heroes window color ---------------------------------------------
+    def coh_rgb(self):
+        """The window border color: the game's own window color when matching is on, else the theme's."""
+        c = self.cfg
+        t = WINDOW_THEMES.get(c.get("window_theme")) or WINDOW_THEMES["coh"]
+        if c.get("match_game_color", True):
+            ch = self.build_char() if getattr(self, "parser", None) is not None else None
+            v = (c.get("char_colors") or {}).get(ch) if ch else None
+            v = v or c.get("coh_last")
+            if v:
+                return cohskin.pct_to_rgb(v)
+        return tuple(t["border"])
+
+    def ensure_coh_fonts(self):
+        """Read the game's fonts as soon as the game can be found (e.g. at the first login), then switch."""
+        if getattr(self, "_coh_ok", False):
+            return True
+        try:
+            files = cohassets.extract_coh_fonts(self.game_root(), os.path.join(DATA_DIR, "cohfonts"))
+        except Exception:
+            files = []
+        if not files:
+            return False
+        for fpath in files:
+            win_load_font(fpath)
+        self._coh_font_files = files
+        fams = set(tkfont.families(self.root))
+        if not ("Montreal-DemiBold" in fams and "Montreal-Bold" in fams):
+            return False
+        self._coh_ok = True
+        self._fams = fams
+        if self.cfg.get("skin") == "coh" and self.cfg.get("row_font") in STANDIN_ROW_FONTS:
+            self.cfg["row_font"] = "Montreal-DemiBold"
+        _TXT.clear()
+        self.reapply_all()
+        self.save_cfg()
+        return True
+
+    def color_log(self, msg):
+        """A short diary of the window-color reader (DATA_DIR/color_log.txt) for troubleshooting."""
+        try:
+            path = os.path.join(DATA_DIR, "color_log.txt")
+            if os.path.isfile(path) and os.path.getsize(path) > 200000:
+                os.replace(path, path + ".old")
+            with open(path, "a", encoding="utf-8") as f:
+                f.write(time.strftime("%Y-%m-%d %H:%M:%S ") + msg + "\n")
+        except Exception:
+            pass
+
+    def coh_detect_soon(self, tries=20, force=False):
+        self.color_log("start reading (tries=%d force=%s char=%s)" % (tries, force, self.build_char()))
+        try:
+            self.ensure_coh_fonts()
+        except Exception:
+            pass
+        self._coh_tries = tries
+        self._coh_force = force
+        self._coh_prev = None
+        try:                    # a color already known for this character shows straight away
+            if self.cfg.get("match_game_color", True) and self.main and \
+                    tuple(_hex_rgb(C["border"])) != tuple(self.coh_rgb()):
+                self.reapply_all()
+        except Exception:
+            pass
+        self.root.after(1000 if force else 2500, self._coh_try)    # give the game's windows time to appear
+
+    def _coh_try(self):
+        if getattr(self, "_coh_tries", 0) <= 0 or getattr(self, "_coh_busy", False):
+            return
+        self._coh_tries -= 1
+        c = self.cfg
+        if not c.get("match_game_color", True):
+            return
+        ch0 = self.build_char()
+        if ch0 == "You":
+            ch0 = None                          # in the world, but the log hasn't named the character yet
+        if ch0 and ch0 in (c.get("char_colors") or {}) and tuple(_hex_rgb(C["border"])) != tuple(self.coh_rgb()):
+            self.reapply_all()                  # this character's saved color right away, then check the screen
+        hwnd, _t = find_game_window()
+        busy_screen = getattr(self, "logged_out", False) or getattr(self, "_at_select", False)
+        if not hwnd or busy_screen or not game_is_active() or ctypes.windll.user32.IsIconic(ctypes.c_void_p(hwnd)):
+            self.color_log("waiting: game=%s logged_out=%s select=%s in_front=%s" % (
+                bool(hwnd), getattr(self, "logged_out", False), getattr(self, "_at_select", False),
+                bool(hwnd) and game_is_active()))
+            self.root.after(3000, self._coh_try)
+            return
+        r = _RECT()
+        ctypes.windll.user32.GetWindowRect(ctypes.c_void_p(hwnd), ctypes.byref(r))
+        rect = (r.left, r.top, r.right, r.bottom)
+        excl = []
+        try:                    # never read the area under the mouse (hover highlights fool it)
+            mx, my = self.root.winfo_pointerxy()
+            excl.append((mx - 220, my - 160, mx + 220, my + 160))
+        except Exception:
+            pass
         for w in self.windows():
             try:
-                recolor(w.top, mapping)
-                w.draw_title()
+                t = w.top
+                if t.winfo_exists() and t.state() == "normal":
+                    excl.append((t.winfo_rootx(), t.winfo_rooty(), t.winfo_rootx() + t.winfo_width(),
+                                 t.winfo_rooty() + t.winfo_height()))
             except Exception:
                 pass
-        self.apply_cfg_all()
-        for m in self.meters:
-            m.apply_layout()
+        char = ch0
+        self._coh_busy = True
+        import threading
+
+        def work():
+            col = None
+            try:
+                col = cohskin.detect_window_color(cohskin.capture(rect, excl))
+            except Exception:
+                col = None
+            self._coh_pending = (char, col)          # picked up by poll() on the Tk thread
+        threading.Thread(target=work, daemon=True).start()
+
+    def _coh_result(self, char, col):
+        self._coh_busy = False
+        self.color_log("read: %s for %s" % (col, char or "(name not known yet)"))
+        if col is None:                     # not sure: keep the last good color and try again shortly
+            if getattr(self, "_coh_tries", 0) > 0:
+                self.root.after(2500, self._coh_try)
+            return
+        pct = list(cohskin.rgb_to_pct(col))
+        prev = getattr(self, "_coh_prev", None)
+        if prev is None or max(abs(a - b) for a, b in zip(prev, pct)) > 3:
+            self._coh_prev = pct            # only trust a color seen twice in a row
+            if getattr(self, "_coh_tries", 0) > 0:
+                self.root.after(500, self._coh_try)
+            return
+        c = self.cfg
+        if char:
+            changed = (c.get("char_colors") or {}).get(char) != pct
+            c.setdefault("char_colors", {})[char] = pct
+            (c.get("char_picked") or {}).pop(char, None)
+        else:                               # name not known yet: just use it for now
+            changed = tuple(_hex_rgb(C["border"])) != tuple(cohskin.pct_to_rgb(pct))
+        c["coh_last"] = pct
+        self._coh_tries = 0
         self.save_cfg()
-        if self.options is not None:
-            self.options.build()
-        if self.recap is not None and self.recap.top.state() != "withdrawn":
-            self.recap.draw()
-        self.redraw(force=True, breakdown=True)
-        self.main.flash_title("Theme: " + t["label"], 2)
+        if changed or self._coh_force:
+            self.reapply_all()
+            self.main.flash_title("Window color matched: %d / %d / %d %%" % tuple(pct), 3)
 
     def reparse(self):
         """Re-read the current log from the start (after parser options changed)."""
@@ -4966,12 +6447,52 @@ class App:
             a = min(a, float(c["alpha"]) * float(c["hover_alpha"]))
         return max(0.01, min(1.0, a))
 
+    def _tip_watch(self):
+        tip = getattr(self, "tip", None)
+        if tip is None or tip.key is None or tip.top is None:
+            return
+        try:
+            mx, my = self.root.winfo_pointerxy()
+            for w in list(getattr(self, "meters", [])):
+                t = w.top
+                if t.state() == "normal" and t.winfo_rootx() <= mx < t.winfo_rootx() + t.winfo_width() and \
+                        t.winfo_rooty() <= my < t.winfo_rooty() + t.winfo_height():
+                    return
+            tip.hide()
+        except Exception:
+            pass
+
     def auto_loop(self):
+        self._tip_watch()
         try:
             in_combat = self.parser.current is not None
             want = bool(self.cfg["click_through"] or (self.cfg["click_through_combat"] and in_combat))
             if want and key_down(0x11):       # hold Ctrl to use the meter
                 want = False
+            if is_coh(self):
+                px_, py_ = self.root.winfo_pointerxy()
+                for w in self.windows():
+                    try:
+                        t = w.top
+                        if t.state() != "normal":
+                            bd = getattr(w, "backdrop", None)
+                            if bd is not None and bd.visible:
+                                bd.sync()
+                            continue
+                        x_, y_ = t.winfo_rootx(), t.winfo_rooty()
+                        hv = x_ <= px_ < x_ + t.winfo_width() and y_ <= py_ < y_ + t.winfo_height()
+                        if hv != getattr(w, "_glow", None):
+                            w._glow = hv
+                        bd = getattr(w, "backdrop", None)
+                        if bd is not None:
+                            bd.sync()
+                    except Exception:
+                        pass
+            else:
+                for w in self.windows():
+                    bd = getattr(w, "backdrop", None)
+                    if bd is not None and bd.visible:
+                        bd.sync()
             for m in list(self.meters):
                 t = m.top
                 if t.state() != "normal":
@@ -5102,6 +6623,9 @@ class App:
                 w.rescale()
             except Exception:
                 pass
+        if is_coh(self):
+            _TXT.clear()
+            self.reapply_all()          # fonts, borders and frames at the new size
         self.redraw(force=True, breakdown=True)
 
     def check_monitor(self):
@@ -5429,7 +6953,7 @@ class App:
                  "Log: %s" % mask(self.log_path),
                  "Log warning: %s   logged out: %s" % (self.log_warning(), getattr(self, "logged_out", False)),
                  "Mids: %s   builds found: %d" % ("yes" if mids.mids_exe() else "no", len(builds)),
-                 "Theme: %s  Skin: %s  Profile: %s  Windows: %d" % (self.cfg.get("theme"), self.cfg.get("skin"),
+                 "Theme: %s  Skin: %s  Profile: %s  Windows: %d" % (self.cfg.get("bar_theme"), self.cfg.get("skin"),
                                                                     self.cfg.get("active_profile"), len(self.meters))]
         try:
             with open(ERROR_LOG, "r", encoding="utf-8", errors="replace") as fh:
@@ -5513,6 +7037,10 @@ class App:
                 self.tip.show(x, y, row.name, row.color, [("Click / right-click", "go back", 0, row.color)],
                               row.key)
             return
+        if isinstance(row.key, str) and row.key.startswith("@demo:"):
+            self.tip.show(x, y, row.name + "  (example)", row.color,
+                          [("Damage", row.right, 1.0, row.color), ("This is a sample bar", "", 0, C["dim"])], row.key)
+            return
         drill = getattr(self.cur, "drill", None)
         if drill and row.kind == "power":
             self.show_power_tip(drill, row, x, y)
@@ -5563,7 +7091,7 @@ class App:
         self.tip.show(x, y, title, row.color, lines, row.key)
 
     def show_power_tip(self, drill, row, x, y):
-        bd = build_breakdown(self, self.get_segment(), drill[0], drill[1])
+        bd = build_breakdown(self, self.get_segment(), drill[0], drill[1], getattr(self.cur, "drill_procs", None))
         if bd is None or not bd.tabs:
             return
         _l, kind, data = bd.tabs[0]
@@ -5594,11 +7122,12 @@ class App:
         lines.append(("Click", "full breakdown", 0, C["dim"]))
         self.tip.show(x, y, row.name, row.color, lines[:max(3, nlines_default(self))], row.key)
 
-    def open_breakdown_at(self, mode, key, sel):
+    def open_breakdown_at(self, mode, key, sel, procs=None):
         self.bd_src = self.cur
         if self.breakdown is None:
             self.breakdown = Breakdown(self)
-        self.breakdown.open(mode, key)
+        self.breakdown.procs = procs
+        self.breakdown.open(mode, key, keep_procs=True)
         self.breakdown.tab = 0
         self.breakdown.sel = sel
         self.breakdown.draw_table()
@@ -5699,12 +7228,31 @@ class App:
             self.main.flash_title("Profile: " + name, 2)
 
     def reapply_all(self):
+        """Push every look/behavior setting to every window, then paint once and re-show every frame."""
+        self._reapply_all()
+        try:
+            self.root.update_idletasks()
+        except Exception:
+            pass
+        for w in self.windows():
+            bd = getattr(w, "backdrop", None)
+            if bd is not None:
+                try:
+                    bd.sync(force=True)
+                except Exception:
+                    pass
+
+    def _reapply_all(self):
         """Push every look/behavior setting to every window (after a profile or skin change)."""
-        old = apply_theme_palette(self.cfg.get("theme", "minimal"))
+        load_window_themes(self.cfg.get("custom_window_themes"))
+        old = apply_look(self.cfg.get("skin", "coh"), self.cfg.get("window_theme", "coh"),
+                         self.cfg.get("bar_theme", "minimal"), self.coh_rgb())
         mapping = {}
         for k, v in old.items():
-            if k in C and v.lower() != C[k].lower():
+            if k in C and isinstance(v, str) and v.startswith("#") and v.lower() != C[k].lower():
                 mapping.setdefault(v.lower(), C[k])
+        c = self.cfg
+        c["body_bg"], c["border_color"], c["bar_bg_color"] = C["bg"], C["border"], C["bar_bg"]
         Fmt.abbreviate = self.cfg["abbreviate"]
         self.collapsed = set(self.cfg.get("collapsed") or [])
         self.apply_cfg_all()
@@ -5723,6 +7271,11 @@ class App:
             m.apply_layout()
             m.draw_title()
             set_noactivate(m.top, self.cfg["no_focus"])
+        for w in self.windows():
+            try:
+                w.apply_frame()
+            except Exception:
+                pass
         if self.options is not None:
             self.options.build()
         if self.recap is not None and self.recap.top.state() != "withdrawn":
@@ -5784,37 +7337,39 @@ class App:
 
     # --- skins -----------------------------------------------------------------
     def all_skins(self):
+        """Layout presets (sizes / fonts / layout)."""
         d = dict(SKINS)
         for k, v in (self.cfg.get("custom_skins") or {}).items():
             d["custom:" + k] = dict(v, label=k)
         return d
 
     def apply_skin(self, key):
+        """Apply a layout preset (kept under its old name for profiles)."""
         sk = self.all_skins().get(key)
         if sk is None:
             return
         for k in SKIN_KEYS:
-            if k in sk:
+            if k in sk and not (k == "row_font" and is_coh(self)):
                 self.cfg[k] = sk[k]
-        self.cfg["skin"] = key
+        self.cfg["layout"] = key
         self.reapply_all()
         self.save_cfg()
-        self.main.flash_title("Skin: " + sk["label"], 2)
+        self.main.flash_title("Layout: " + sk["label"], 2)
 
     def save_skin_as(self, name):
         name = name.strip()
         if not name:
             return False
         self.cfg.setdefault("custom_skins", {})[name] = {k: self.cfg[k] for k in SKIN_KEYS}
-        self.cfg["skin"] = "custom:" + name
+        self.cfg["layout"] = "custom:" + name
         self.save_cfg()
         return True
 
     def delete_skin(self, key):
         if key.startswith("custom:"):
             self.cfg.get("custom_skins", {}).pop(key[7:], None)
-            if self.cfg.get("skin") == key:
-                self.cfg["skin"] = ""
+            if self.cfg.get("layout") == key:
+                self.cfg["layout"] = ""
             self.save_cfg()
 
     def character_unknown(self, msg, warn=False, select=False):
@@ -5826,6 +7381,10 @@ class App:
         self._at_select = select
         if select:
             self._log_warn = False
+            try:                        # the log grows again ("Your chat is now being logged") once you're in
+                self._select_size = os.path.getsize(self.log_path) if self.log_path else None
+            except OSError:
+                self._select_size = None
         if p.current is not None:
             p._close_current()          # the old character's fight is over
             self._switch_ts = max(self._switch_ts, p.segments[-1].last if p.segments else 0)
@@ -5848,12 +7407,26 @@ class App:
                 if hwnd and getattr(self, "_last_title", None) and getattr(self, "_at_select", False):
                     self._at_select = False                 # left character select
                     self._login_wall = now
+                    self.coh_detect_soon()                  # read the new character's window color
                     self._need_welcome = True
                     self._logins_at_enter = getattr(self.parser, "login_count", 0)
                     self.redraw(force=True)
                 self._last_title = (hwnd, title)
                 self._log_title(title if hwnd else "<game not running>", menu)
             p = self.parser
+            ss = getattr(self, "_select_size", None)
+            if getattr(self, "_at_select", False) and ss is not None and hwnd and self.log_path:
+                try:
+                    grown = os.path.getsize(self.log_path) > ss
+                except OSError:
+                    grown = False
+                if grown:                                   # in the world (no Welcome line needed)
+                    self._select_size = None
+                    self._at_select = False
+                    self._login_wall = now
+                    self.color_log("left character select (log grew)")
+                    self.coh_detect_soon()
+                    self.redraw(force=True)
             if getattr(self, "_need_welcome", False) and now - getattr(self, "_login_wall", now) > 6:
                 self._need_welcome = False
                 if not getattr(p, "last_login_welcome", False) or \
@@ -5891,6 +7464,7 @@ class App:
                 if self.logged_out:
                     self.logged_out = False
                     self._back_ts = now
+                    self.coh_detect_soon()
                     self._logins_at_back = getattr(p, "login_count", 0)
             # back in the world quickly with no 'Welcome' line: it was just a loading screen
             back = getattr(self, "_back_ts", None)
@@ -6016,6 +7590,10 @@ class App:
 
     def poll(self):
         backlog = False
+        pend = getattr(self, "_coh_pending", None)
+        if pend is not None:
+            self._coh_pending = None
+            self._coh_result(*pend)
         up = getattr(self, "_update_pending", None)
         if up is not None:
             self._update_pending = None
@@ -6042,6 +7620,7 @@ class App:
                 self._need_welcome = not getattr(self.parser, "last_login_welcome", True)
                 if not self.tail or self.tail.done:
                     self.profile_for_character(self.parser.player)
+                    self.coh_detect_soon()
             if not backlog:
                 self.parser.tick(now)
             # day rollover for automatic mode
@@ -6097,6 +7676,10 @@ class App:
         if getattr(self, "_quitting", False):
             return
         self._quitting = True
+        import threading
+        t = threading.Timer(4.0, lambda: os._exit(0))     # never linger in the background after Close
+        t.daemon = True
+        t.start()
         for w in self.windows():
             try:
                 w.save_geom()

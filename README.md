@@ -4,7 +4,7 @@
 
 A damage meter for City of Heroes (Homecoming), modeled on Details! from World of Warcraft.
 
-It reads your chat log while you play and shows damage, healing, deaths and pet numbers in a small window on top of the game. It's one `.exe` with no installer. It's free, and the code is open source.
+It reads your chat log while you play and shows damage, healing, deaths and pet numbers in a small window on top of the game. Out of the box it looks like one of the game's own windows, in your own window color. It's one `.exe` with no installer. It's free, and the code is open source.
 
 ![Two Hero Meter windows snapped together](docs/screenshots/meter-windows.png)
 
@@ -52,14 +52,22 @@ When you die, the recap shows the last few seconds hit by hit: who killed you, w
 
 - **Several windows**: open more meters, each showing its own mode and fight. Drag them near each other and they snap together and move as one. Hold Alt while dragging to pull one off.
 - **Tabs**: give any window extra tabs so you can flip between modes.
-- **Themes**: nine built-in color themes, including Hero, Villain, Praetorian and Rikti. The Theme Editor lets you change any color, save it as your own theme, and share it with friends by copy and paste.
-
-![A few of the themes](docs/screenshots/themes.png)
-
-- **Skins** change the shape of the meter: bar height, fonts, text style, title bar and status bar. You can pick any font on your PC or add your own `.ttf` file.
+- **Skins** set the shape of every window. **City of Heroes** (the default) copies the game's own windows: the oval title tab, the beveled border, the see-through body, the hover glow, the game's menus and the game's own fonts. **Details!** is the flat, square look of the WoW addon.
 
 ![The skins page](docs/screenshots/skins.png)
 
+![The same meter in the Details! skin](docs/screenshots/details-skin.png)
+
+- **Window Themes** are the window colors. Every theme works with every skin, and the Window Theme Editor lets you make your own.
+- **Match the game's window color** is on by default. When you log in, the meter reads your character's window color from the game's own window borders and uses it, so each character gets their own color without any typing. Want an exact pick instead? Click **Pick it from a game window** and click the border of any game window.
+
+![A few of the window themes](docs/screenshots/themes.png)
+
+![The Window Themes page](docs/screenshots/window-themes.png)
+
+- **Bar Themes** color the bars and text. They also work with every skin, and the Bar Theme Editor lets you change any color, save it as your own theme, and share it with friends by copy and paste.
+- **Layout presets** change sizes and fonts in one click. You can also pick any font on your PC or add your own `.ttf` file.
+- **Show example bars** fills the meter with sample numbers while Options is open, so you can try looks without a fight.
 - **Profiles** save your whole setup, including window layout. You can export and import them, and give each character its own profile so the meter switches when you log in.
 
 ### It keeps up with your characters
@@ -85,7 +93,7 @@ The chat log can only show so much. Passive powers like Health and Stamina never
 
 ## Privacy
 
-Hero Meter only reads files on your own PC: your chat logs, your account's character list and, if you have Mids, your builds. Nothing gets uploaded. The one thing it does online is check GitHub for a newer version, and you can turn that off under **⚙ → About Hero Meter**.
+Hero Meter only reads files on your own PC: your chat logs, your account's character list, the game's fonts and, if you have Mids, your builds. To match your window color it looks at the game window, only while City of Heroes is the window in front, and keeps nothing but the color it found. Nothing gets uploaded. The one thing it does online is check GitHub for a newer version, and you can turn that off under **⚙ → About Hero Meter**.
 
 Settings are saved in `%APPDATA%\Hero Meter`. To keep everything next to the exe instead (handy on a USB stick), put an empty file named `portable.txt` beside `HeroMeter.exe`.
 
@@ -111,6 +119,7 @@ To release a new version: bump `VERSION` in `src/meter.py`, add a note to `CHANG
 
 - Inspired by **Details! Damage Meter** for World of Warcraft.
 - **Oswald** font by Vernon Adams and contributors, under the SIL Open Font License (see `src/fonts/OFL.txt`).
+- The City of Heroes skin uses the game's own fonts, read from your Homecoming install. They aren't included with Hero Meter. Until the game is found, a similar Windows font stands in.
 - Build data and enhancement names come from your own **Mids Reborn** install, when you have one.
 - The screenshots use made-up demo characters.
 

@@ -13,6 +13,10 @@ coh_details_config.json
 *.log
 portable.txt
 /fonts/
+cohfonts/
 
 # scratch / test scripts
 src/_*.py
+src/_*.png
+src/_*.jpg
+color_log.txt*
