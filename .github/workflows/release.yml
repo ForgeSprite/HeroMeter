@@ -29,10 +29,9 @@ jobs:
         shell: pwsh
         run: |
           $tag = "${{ github.ref_name }}".TrimStart("v")
-          $base = $tag.Split("-")[0]
           $line = Select-String -Path src/meter.py -Pattern '^VERSION = "(.+)"'
           $ver = $line.Matches[0].Groups[1].Value
-          if ($ver -ne $base) { throw "src/meter.py says VERSION = $ver but the tag is v$tag" }
+          if ($ver -ne $tag) { throw "src/meter.py says VERSION = $ver but the tag is v$tag" }
 
       - name: Build
         shell: pwsh

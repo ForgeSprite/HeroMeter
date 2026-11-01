@@ -2,6 +2,15 @@
 
 All notable changes to Hero Meter are listed here, newest first.
 
+## v2.0.0-beta.3
+
+### Fixed
+- **Pseudo pets count as your damage.** Powers that drop an invisible stand-in to do their damage (Rain of
+  Fire, Caltrops, Burn, Chain Induction, Lightning Rod, the Judgement powers and others) are now credited to
+  you under the power's name, instead of showing up as a separate pet.
+- Hits forced by the streakbreaker now count toward accuracy, for you and your pets.
+- "Unresistable" damage is listed under its real damage type.
+
 ## v2.0.0-beta.2
 
 ### New

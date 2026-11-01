@@ -22,7 +22,7 @@ import mids
 import pettypes
 
 APP_NAME = "Hero Meter"
-VERSION = "2.0.0"
+VERSION = "2.0.0-beta.3"
 REPO = "ForgeSprite/HeroMeter"            # GitHub owner/name: update check + About links
 FROZEN = getattr(sys, "frozen", False)
 
@@ -6996,8 +6996,13 @@ class App:
         self.save_cfg()
 
         def vt(t):
+            """'v2.0.0-beta.3' -> (2, 0, 0, 0, 3); a full release ranks above its betas."""
             import re as _re
-            return tuple(int(x) for x in _re.findall(r"\d+", t or "")[:3]) or (0,)
+            m = _re.match(r"v?(\d+)\.(\d+)\.(\d+)(?:-[A-Za-z]*\.?(\d+))?", (t or "").strip())
+            if not m:
+                return (0,)
+            a, b, c, pre = m.groups()
+            return (int(a), int(b), int(c), 0 if pre else 1, int(pre or 0))
         if res and vt(res[0]) > vt(VERSION):
             self.update_info = res
             self.main.flash_title("\u2b06 Update %s available \u2014 see the \u2699 menu" % res[0], 6)

@@ -20,11 +20,12 @@ TS_RE = re.compile(r"^(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d) (.*?)\s*$")
 PET_RE = re.compile(r"^([^\[\]:]{1,40}):  (.*)$")
 
 R_DMG = re.compile(r"^You hit (.+?) with your (.+?) for " + NUM +
-                   r" points? of (.+?) damage( over time)?\.?(?: \(([^)]+)\))?\.?$")
-R_HIT = re.compile(r"^HIT (.+?)! Your (.+?) power (?:had a ([\d.]+)% chance to hit, you rolled a [\d.]+|is autohit)")
+                   r" points? of (?:unresistable )?(.+?) damage( over time)?\.?(?: \(([^)]+)\))?\.?$")
+R_HIT = re.compile(r"^HIT (.+?)! Your (.+?) power (?:had a ([\d.]+)% chance to hit, you rolled a [\d.]+|is autohit"
+                   r"|was forced to hit by streakbreaker)")
 R_MISS = re.compile(r"^MISSED (.+?)!+ Your (.+?) power had a ([\d.]+)% chance to hit, you rolled a [\d.]+")
 R_TAKEN = re.compile(r"^(.+?) hits you with their (.+?) for " + NUM +
-                     r" points? of (.+?) damage( over time)?\.?(?: \(([^)]+)\))?\.?$")
+                     r" points? of (?:unresistable )?(.+?) damage( over time)?\.?(?: \(([^)]+)\))?\.?$")
 R_EHIT = re.compile(r"^(.+?) HITS you! (.+?) power (?:had a ([\d.]+)% chance to hit and rolled a [\d.]+|is autohit)")
 R_EMISS = re.compile(r"^(.+?) MISSES! (.+?) power had a ([\d.]+)% chance to hit, but rolled a [\d.]+")
 R_HEAL = re.compile(r"^You heal (.+?) with (.+?) for " + NUM + r" health points?")
@@ -43,6 +44,32 @@ R_NAME = re.compile(r"^(?:Welcome to City of Heroes|Now entering .+?), (.+?)!$")
 R_DEATH = re.compile(r"(brink of death|You have been defeated|You were defeated|You are defeated|"
                      r"have been resurrected|resurrects you|revives you|You have been revived|"
                      r"Rise of the Phoenix|Return to Hospital)", re.I)
+
+
+# Pseudo pets: invisible stand-ins some powers drop (Rain of Fire, Caltrops, Burn patches, Chain
+# Induction's jumps, Judgement powers...). The log shows their damage as if a pet did it, often under a
+# different name than the power you clicked. Their damage is yours, so it's credited to you under the
+# power's name. Anything named exactly like a power you activated counts too (see Parser.pseudo_pet).
+# (pattern on the pet name, power to credit it to, power you must have used first or None)
+PSEUDO_PETS = [
+    (r"^Chain Induction Jump", "Chain Induction", None),
+    (r"^(Ion|Cryonic|Mighty|Pyronic|Void|Vorpal)\b.*Judgement", None, None),   # keeps "<kind> Judgement"
+    (r"^Lightning ?Rod", "Lightning Rod", None),
+    (r"^Irradiated.*Ground", "Irradiated Ground", None),
+    (r"^Burn\b", "Burn", None),
+    (r"^Rain ?of ?Arrows|RainofArrows", "Rain of Arrows", None),
+    (r"^Savage Leap", "Savage Leap", None),
+    (r"^Meteor\b", "Meteor", None),
+    (r"^Caltrops\b", "Caltrops", None),
+    (r"^Bonfire\b", "Bonfire", None),
+    (r"^Liquid Nitrogen\b", "Liquid Nitrogen", None),
+    (r"^Poison Gas Arrow\b", "Poison Gas Arrow", None),
+    (r"^Fire$", "Oil Slick Arrow", "Oil Slick Arrow"),
+]
+PSEUDO_RES = [(re.compile(p), m, need) for p, m, need in PSEUDO_PETS]
+_RE_OWN_DMG = re.compile(r"^(You hit .+? with your ).+?( for [\d,.]+ points? of )")
+_RE_OWN_HIT = re.compile(r"^((?:HIT|MISSED) .+?!+ Your ).+?( power )")
+_RE_OWN_HEAL = re.compile(r"^(You heal .+? with ).+?( for [\d,.]+ health)")
 
 
 def num(s):
@@ -343,6 +370,7 @@ class Parser:
         self.recap_window = recap_window
         self.player = "You"
         self.typer = pettypes.PetTyper()
+        self.my_powers = set()          # powers you've activated (to spot pseudo pets named after them)
         self.my_chars = set()           # every character name on the account (playerslot.txt)
         self.renames = {}               # power name -> merged / renamed name
         self.dot_separate = False       # list damage-over-time ticks as "<power> (DoT)"
@@ -448,7 +476,12 @@ class Parser:
             if actor_name == self.player:
                 kind = "player"
             else:
-                self.typer.on_pet_line(actor_name, body, ts)
+                merged = self.pseudo_pet(actor_name)
+                if merged:                      # a pseudo pet: its damage is yours, under the power's name
+                    body = self._as_own(body, merged)
+                    actor_name, kind = self.player, "player"
+                else:
+                    self.typer.on_pet_line(actor_name, body, ts)
         try:
             if kind == "player" and ("our " in body or body.endswith(" is recharged.")):
                 sm = R_SEEN.search(body)
@@ -460,6 +493,25 @@ class Parser:
             self._dispatch(ts, actor_name, kind, body)
         except Exception:
             pass  # never let one weird line break the meter
+
+    def pseudo_pet(self, name):
+        """The power a pseudo pet's damage belongs to, or None for a real pet."""
+        if name in self.typer.known:
+            return None
+        for rx, merged, need in PSEUDO_RES:
+            if rx.search(name) and (need is None or need in self.my_powers):
+                return merged or name
+        if name in self.my_powers:
+            return name
+        return None
+
+    @staticmethod
+    def _as_own(body, power):
+        f = lambda m: m.group(1) + power + m.group(2)
+        for rx in (_RE_OWN_DMG, _RE_OWN_HIT, _RE_OWN_HEAL):
+            if rx.match(body):
+                return rx.sub(f, body, 1)
+        return body
 
     def _dispatch(self, ts, who, kind, body):
         c0 = body[0]
@@ -687,6 +739,7 @@ class Parser:
             m = R_ACTIVATE.match(body)
             if m:
                 power = self.pname(m.group(1))
+                self.my_powers.add(m.group(1))
                 self.typer.on_activate(m.group(1), ts)
                 for seg in self._targets(ts, combat=False):
                     a = seg.actor(who, kind)

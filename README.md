@@ -121,6 +121,7 @@ To release a new version: bump `VERSION` in `src/meter.py`, add a note to `CHANG
 - **Oswald** font by Vernon Adams and contributors, under the SIL Open Font License (see `src/fonts/OFL.txt`).
 - The City of Heroes skin uses the game's own fonts, read from your Homecoming install. They aren't included with Hero Meter. Until the game is found, a similar Windows font stands in.
 - Build data and enhancement names come from your own **Mids Reborn** install, when you have one.
+- The list of oddly named pseudo pets started from the one in **[Cyclops](https://github.com/PaulBenHill/cyclops)** by Paul Benjamin Hill (Apache 2.0).
 - The screenshots use made-up demo characters.
 
 ## License

@@ -11,6 +11,15 @@ If Windows says **"Windows protected your PC"**, click **More info → Run anywa
 signing certificate always get that warning. This file was built by GitHub from the code in this repo, and its
 SHA-256 checksum is in `SHA256.txt` below.
 
+### New in beta.3
+
+- **Pseudo pets count as your damage.** Rain of Fire, Caltrops, Burn, Chain Induction, Lightning Rod, the
+  Judgement powers and other powers that drop an invisible stand-in are now credited to you under the
+  power's name, instead of showing up as a separate pet.
+- **Streakbreaker hits** now count toward accuracy, for you and your pets.
+- **"Unresistable" damage** is listed under its real damage type.
+- The version number now shows which beta you're on (**⚙ → About Hero Meter**).
+
 ### New in beta.2
 
 - **City of Heroes skin**, now the default. Every Hero Meter window looks like a window from the game:
