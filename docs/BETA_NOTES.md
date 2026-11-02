@@ -14,6 +14,14 @@ If Windows says **"Windows protected your PC"**, click **More info → Run anywa
 signing certificate always get that warning. This file was built by GitHub from the code in this repo, and its
 SHA-256 checksum is in `SHA256.txt` below.
 
+### New in beta.6
+
+- **An easier, illustrated user guide**: a screenshot of every Options page, short animations, and the
+  full settings tables tucked away until you open them. Open it with **⚙ → User Guide**.
+- **Welcome tip** for new users, and an **"Updated" notice** with a link to what changed.
+- Clearer names: **Total DPS (all bars)** in the statusbar, and **Builds (planned vs actual)** in the ⚙ menu.
+- The "Log Chat is off" and "pet damage isn't being logged" warnings link to the setup steps.
+
 ### New in beta.5
 
 - **User guide**: every setting with its default, the bigger features and a troubleshooting FAQ. Open it

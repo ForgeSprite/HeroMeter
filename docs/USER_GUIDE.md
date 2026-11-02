@@ -318,9 +318,9 @@ An optional strip under the bars.
 | Show statusbar | Off |
 | Left | Segment name |
 | Center | Fight timer |
-| Right | Group DPS |
+| Right | Total DPS (all bars) |
 
-Each slot can also show your DPS, group damage, deaths, kills or nothing.
+Total DPS and total damage add up every bar on the meter, which is usually you and your pets. Each slot can also show just your DPS, deaths, kills or nothing.
 
 </details>
 

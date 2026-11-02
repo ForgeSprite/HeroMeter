@@ -28,7 +28,7 @@ import mids
 import pettypes
 
 APP_NAME = "Hero Meter"
-VERSION = "2.0.0-beta.5"
+VERSION = "2.0.0-beta.6"
 REPO = "ForgeSprite/HeroMeter"            # GitHub owner/name: update check + About links
 GUIDE_URL = "https://github.com/" + REPO + "/blob/main/docs/USER_GUIDE.md"
 # Options page -> section of the user guide (GitHub heading anchors)
@@ -226,13 +226,14 @@ DEFAULTS = {
     "records_popup": True,               # pop-up when you set a new record
     "records_by_build": False,           # separate records for each linked build
     "records_min_fight": 20,             # shortest fight (seconds) that counts for per-second records
+    "last_version": "",                  # the version that last ran (for the "what's new" notice)
 }
 
 # Settings that belong to the whole app rather than to a profile.
 GLOBAL_KEYS = {"bd_geometry", "recap_geometry", "opt_geometry", "log_path", "logs_dir", "log_auto",
                "log_cleanup", "log_keep_days", "log_delete_days", "log_cleanup_last",
                "records", "records_mode", "records_popup", "records_by_build", "records_min_fight",
-               "pet_log_warned",
+               "pet_log_warned", "last_version",
                "load_history", "opt_page", "custom_themes", "renames", "pet_types", "profiles",
                "active_profile", "char_profiles", "auto_profile", "custom_skins",
                "build_geometry", "char_builds", "auto_build", "build_source",
@@ -3521,7 +3522,7 @@ class MainWindow(DarkWin):
             items.append({"label": "\u2b06  Update available: %s" % app.update_info[0], "color": C["gold"],
                           "cmd": lambda: app.open_url(app.update_info[1])})
         items += [{"label": "Options…", "cmd": app.open_options},
-                 {"label": "Mids' Build \u2014 planned vs actual\u2026", "cmd": app.open_build},
+                 {"label": "Builds (planned vs actual)\u2026", "cmd": app.open_build},
                  {"sep": True},
                  {"label": "Use today's log automatically", "check": app.cfg["log_auto"],
                   "cmd": lambda: app.set_log_auto(not app.cfg["log_auto"])},
@@ -4341,7 +4342,7 @@ class BuildWin(DarkWin):
     TABS = ["Value Ranking", "Planned vs Actual", "Procs", "Not in Build"]
 
     def __init__(self, app):
-        super().__init__(app, "Mids' Build", "build_geometry",
+        super().__init__(app, "Build", "build_geometry",
                          "%dx%d+%d+%d" % (px(860), px(560), px(220), px(120)), min_size=(560, 320))
         self.right_buttons = [(G_CLOSE, lambda x, y: self.close(), "Close")]
         self.build = None
@@ -4392,7 +4393,7 @@ class BuildWin(DarkWin):
         return a.parser.overall
 
     def refresh(self):
-        self.title = "Mids' Build \u2014 " + self.char
+        self.title = "Build: " + self.char
         self.draw_title()
         self.res = None
         if self.build is not None:
@@ -4908,8 +4909,8 @@ class FontPicker:
             self.top.destroy()
         except Exception:
             pass
-SB_CHOICES = [("none", "Nothing"), ("segment", "Segment name"), ("timer", "Fight timer"), ("dps", "Group DPS"),
-              ("my_dps", "Your DPS"), ("damage", "Group damage"), ("deaths", "Deaths"), ("kills", "Kills")]
+SB_CHOICES = [("none", "Nothing"), ("segment", "Segment name"), ("timer", "Fight timer"), ("dps", "Total DPS (all bars)"),
+              ("my_dps", "Your DPS"), ("damage", "Total damage (all bars)"), ("deaths", "Deaths"), ("kills", "Kills")]
 
 
 class DSlider(tk.Canvas):
@@ -6440,6 +6441,7 @@ class App:
         self.root.after(5000, self.check_updates)
         self.root.after(4000, lambda: self.coh_detect_soon(8))
         self.root.after(30000, self._log_cleanup_tick)
+        self.root.after(3500, self._hello)
         if getattr(self, "_fresh_coh", False):      # first run on the new look: switch fonts + bar shape too
             self.root.after(300, lambda: self.set_skin("coh"))
 
@@ -6529,6 +6531,7 @@ class App:
                 if os.path.isfile(old):
                     path = old
                     break
+        self._had_cfg = os.path.isfile(path)     # False on a brand-new install
         try:
             with open(path, "r", encoding="utf-8") as fh:
                 data = json.load(fh)
@@ -6767,9 +6770,9 @@ class App:
             if getattr(self, "toast", None) is None:
                 self.toast = Toast(self)
             title = "Pet damage isn't being logged"
-            detail = "Add the Pet channels to a chat tab \u2014 click for how"
+            detail = "Add the Pet channels to a chat tab. Click for how"
             self.toast.show(title, detail, (120, 200, 255), title + ". " + detail, "#1f4f7a", secs=10,
-                            on_click=lambda: (self.open_options(), self.options.show_page("page_log")))
+                            on_click=lambda: self.open_url(GUIDE_URL + "#set-up-in-three-steps"))
             return
         elif kind == "pet_dead":
             if not c.get("alert_pet_dead", True):
@@ -7432,9 +7435,10 @@ class App:
                         bits.append("zipped %d old log%s" % (res["zipped"], "" if res["zipped"] == 1 else "s"))
                     if res["deleted"]:
                         bits.append("deleted %d old zip%s" % (res["deleted"], "" if res["deleted"] == 1 else "s"))
-                    detail = ", ".join(bits) + " (Options \u2192 Log File)"
+                    detail = ", ".join(bits) + ". Click for settings"
                     self.toast.show("Chat logs tidied", detail[0].upper() + detail[1:], (120, 200, 255),
-                                    "Chat logs tidied: " + detail, "#1f4f7a", secs=6)
+                                    "Chat logs tidied: " + detail, "#1f4f7a", secs=6,
+                                    on_click=lambda: (self.open_options(), self.options.show_page("page_log")))
             if done:
                 done(res)
         threading.Thread(target=work, daemon=True).start()
@@ -7570,6 +7574,24 @@ class App:
         self.recap.show(idx)
 
     # --- about / diagnostics / updates ---------------------------------------
+    def _hello(self):
+        """Once: a welcome on a brand-new install, or a 'what's new' note after an update."""
+        last = self.cfg.get("last_version") or ""
+        if last == VERSION:
+            return
+        self.cfg["last_version"] = VERSION
+        self.save_cfg()
+        if getattr(self, "toast", None) is None:
+            self.toast = Toast(self)
+        if not getattr(self, "_had_cfg", True):
+            t, d = "Welcome to Hero Meter", "New here? Click for the 3-step setup"
+            url = GUIDE_URL + "#set-up-in-three-steps"
+        else:
+            t, d = "Updated to v" + VERSION, "Click to see what's new"
+            url = "https://github.com/%s/releases/tag/v%s" % (REPO, VERSION)
+        self.toast.show(t, d, (120, 200, 255), t + ". " + d, "#1f4f7a", secs=12,
+                        on_click=lambda: self.open_url(url))
+
     def open_url(self, url):
         import webbrowser
         try:
@@ -8192,6 +8214,8 @@ class App:
                  {"label": "and turn on  'Log Chat'", "disabled": True},
                  {"label": "(/logchat switches logging on AND off \u2014 use it once)", "disabled": True},
                  {"sep": True},
+                 {"label": "Open the setup steps in the User Guide",
+                  "cmd": lambda: self.open_url(GUIDE_URL + "#set-up-in-three-steps")},
                  {"label": "Dismiss for 10 minutes", "cmd": dismiss}]
         DMenu(self, x, y, items, min_width=330)
 

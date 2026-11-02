@@ -2,7 +2,11 @@
 
 All notable changes to Hero Meter are listed here, newest first.
 
-## Unreleased
+## v2.0.0-beta.6
+
+### New
+- **Welcome tip** the first time Hero Meter opens on a new PC, with a link to the 3-step setup.
+- **"Updated" notice** the first time a new version opens, with a link to its release notes.
 
 ### Changed
 - **User guide rewritten** to be quicker to read: a "what do you want to do" table at the top, short sections,
@@ -10,6 +14,13 @@ All notable changes to Hero Meter are listed here, newest first.
   for clicking a bar, changing the mode, alerts and Options search. Full settings tables fold away until you
   open them.
 - The README shows the same animations for clicking a bar, changing the mode, alerts and Options search.
+- Statusbar: "Group DPS" and "Group damage" are now **Total DPS (all bars)** and **Total damage (all bars)**,
+  which says what they add up.
+- The ⚙ menu entry for the build window is now **Builds (planned vs actual)…**, since it works with
+  Sidekick builds too. The window itself is called **Build**.
+- The "Log Chat is off" menu and the "pet damage isn't being logged" alert link to the setup steps in the
+  user guide.
+- The "chat logs tidied" notice opens the Log Files page when clicked.
 
 ## v2.0.0-beta.5
 
