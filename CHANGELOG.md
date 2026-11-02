@@ -2,6 +2,15 @@
 
 All notable changes to Hero Meter are listed here, newest first.
 
+## Unreleased
+
+### Changed
+- **User guide rewritten** to be quicker to read: a "what do you want to do" table at the top, short sections,
+  a numbered picture of the title-bar buttons, a screenshot of every Options page, and short animations
+  for clicking a bar, changing the mode, alerts and Options search. Full settings tables fold away until you
+  open them.
+- The README shows the same animations for clicking a bar, changing the mode, alerts and Options search.
+
 ## v2.0.0-beta.5
 
 ### New

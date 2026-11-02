@@ -33,7 +33,11 @@ Fifteen modes: damage done, DPS, damage taken (by enemy or by ability), healing,
 
 Click a bar to see that character's powers. Right-click to go back.
 
-![Drilling into one character's powers](docs/screenshots/drilldown.png)
+![Clicking a bar shows that character's powers](docs/guide/click-bar.gif)
+
+Right-click the title to switch modes.
+
+![Right-click the title to pick a mode](docs/guide/change-mode.gif)
 
 Shift+click a bar for the full breakdown: every power with hits, averages, the biggest hit, accuracy, damage types and targets, plus a DPS-over-time graph of the fight with its peak and average.
 
@@ -55,7 +59,7 @@ When you die, the recap shows the last few seconds hit by hit: who killed you, w
 
 A short pop-up above the meter tells you when you're held, stunned, slept, terrified or confused (and by whom, with what), or when one of your pets is defeated. Immobilize alerts, pet mez alerts and a sound can be switched on in **Options → Alerts**. The pop-up matches the skin you're using.
 
-![A hold alert in the City of Heroes skin](docs/screenshots/alerts.png)
+![A hold alert popping up above the meter](docs/guide/alert.gif)
 
 ### Personal records
 
@@ -82,6 +86,10 @@ Hero Meter keeps each character's best numbers from fights it saw live: biggest 
 
 - **Bar Themes** color the bars and text. They also work with every skin, and the Bar Theme Editor lets you change any color, save it as your own theme, and share it with friends by copy and paste.
 - **Layout presets** change sizes and fonts in one click. You can also pick any font on your PC or add your own `.ttf` file.
+- **Options search** finds any setting by name:
+
+  ![Searching Options for "fade"](docs/guide/options-search.gif)
+
 - **Show example bars** fills the meter with sample numbers while Options is open, so you can try looks without a fight.
 - **Profiles** save your whole setup, including window layout. You can export and import them, and give each character its own profile so the meter switches when you log in.
 
