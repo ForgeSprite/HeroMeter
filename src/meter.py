@@ -18,11 +18,13 @@ import cohparse as cp
 import cohassets
 import cohskin
 import cohframe
+import logmgr
+import records
 import mids
 import pettypes
 
 APP_NAME = "Hero Meter"
-VERSION = "2.0.0-beta.3"
+VERSION = "2.0.0-beta.4"
 REPO = "ForgeSprite/HeroMeter"            # GitHub owner/name: update check + About links
 FROZEN = getattr(sys, "frozen", False)
 
@@ -154,6 +156,12 @@ DEFAULTS = {
     "auto_current": True,
     # tooltips
     "tip_enabled": True,
+    "alert_mez": True,                   # pop-up when you're held / stunned / slept / terrified / confused
+    "alert_pet_dead": True,              # pop-up when one of your pets is defeated
+    "alert_immob": False,                # also alert on immobilize (very common, so off by default)
+    "alert_pet_mez": False,              # pop-up when a pet is mezzed (noisy for Masterminds)
+    "alert_sound": False,                # play a short sound with each alert
+    "bd_graph": True,                    # DPS-over-time graph in the Breakdown window
     "tip_font_size": 13,
     "tip_lines": 10,
     "tip_side": "cursor",
@@ -192,10 +200,21 @@ DEFAULTS = {
     "game_dir": "",
     "check_updates": True,
     "last_update_check": 0,
+    "log_cleanup": True,                 # zip old chat logs and later delete the zips
+    "log_keep_days": 7,                  # chat logs newer than this stay as they are
+    "log_delete_days": 180,              # zipped logs older than this are deleted (0 = never)
+    "log_cleanup_last": "",              # date of the last clean-up
+    "records": {},                       # personal records, per character (see records.py)
+    "records_mode": "full",              # full | light
+    "records_popup": True,               # pop-up when you set a new record
+    "records_by_build": False,           # separate records for each linked build
+    "records_min_fight": 20,             # shortest fight (seconds) that counts for per-second records
 }
 
 # Settings that belong to the whole app rather than to a profile.
 GLOBAL_KEYS = {"bd_geometry", "recap_geometry", "opt_geometry", "log_path", "logs_dir", "log_auto",
+               "log_cleanup", "log_keep_days", "log_delete_days", "log_cleanup_last",
+               "records", "records_mode", "records_popup", "records_by_build", "records_min_fight",
                "load_history", "opt_page", "custom_themes", "renames", "pet_types", "profiles",
                "active_profile", "char_profiles", "auto_profile", "custom_skins",
                "build_geometry", "char_builds", "auto_build", "build_source",
@@ -1134,6 +1153,110 @@ def log_error(where, exc_type, exc, tb):
         pass
 
 
+class Toast:
+    """A small alert that pops up just above the meter for a few seconds. No fading or animation, so it
+    costs next to nothing on a low-end PC. Each skin has its own look (STYLES); a skin without one gets
+    the plain flat style."""
+
+    STYLES = {"coh": "_show_coh"}       # skin -> drawing method
+
+    def __init__(self, app):
+        self.app = app
+        self.t = None
+        self.lab = None
+        self.ct = None                  # the City of Heroes (layered) window
+        self._job = None
+        self._last = ("", 0.0)
+
+    def show(self, title, detail="", accent=(255, 96, 96), flat_text=None, flat_bg="#7a1420", secs=2.8):
+        text = flat_text or (title + (" " + detail if detail else ""))
+        now = time.time()
+        if self._last[0] == text and now - self._last[1] < 1.5:
+            return
+        self._last = (text, now)
+        if self._job:                   # a newer alert replaces the one on screen
+            try:
+                self.app.root.after_cancel(self._job)
+            except Exception:
+                pass
+        self.hide()
+        style = self.STYLES.get(self.app.cfg.get("skin", "coh"), "_show_flat")
+        try:
+            getattr(self, style)(title, detail, accent, text, flat_bg)
+        except Exception:
+            self._show_flat(title, detail, accent, text, flat_bg)
+        self._job = self.app.root.after(int(secs * 1000), self.hide)
+
+    def _place(self, w, h):
+        m = self.app.main.top
+        x = m.winfo_rootx() + (m.winfo_width() - w) // 2
+        y = m.winfo_rooty() - h - px(8)
+        if y < m.winfo_vrooty():
+            y = m.winfo_rooty() + m.winfo_height() + px(8)
+        return x, y
+
+    def _show_coh(self, title, detail, accent, text, flat_bg):
+        app = self.app
+        font = next((f for f in getattr(app, "_coh_font_files", []) if "demibold" in f.lower()), None)
+        look = cohframe.MenuLook(coh_scale(app), font)
+        img = cohframe.render_toast(title, detail, accent, look)
+        w, h = img.size
+        x, y = self._place(w, h)
+        if self.ct is None or not self.ct.winfo_exists():
+            t = self.ct = tk.Toplevel(app.root)
+            t.overrideredirect(True)
+            t.attributes("-topmost", True)
+            t.configure(bg="#000000")
+            t.geometry("%dx%d+%d+%d" % (w, h, x, y))
+            t.update_idletasks()
+            hwnd = hwnd_of(t)
+            u = _u32()
+            st = u.GetWindowLongW(ctypes.c_void_p(hwnd), -20)
+            u.SetWindowLongW(ctypes.c_void_p(hwnd), -20, st | 0x80000 | 0x80)
+            self._chwnd = hwnd
+            t.bind("<Button-1>", lambda e: self.hide())
+        self.ct.geometry("%dx%d+%d+%d" % (w, h, x, y))
+        self.ct.deiconify()
+        self.ct.lift()
+        cohframe.update_layered(self._chwnd, cohframe.premultiply(img), x, y, 255)
+
+    def _show_flat(self, title, detail, accent, text, flat_bg):
+        app = self.app
+        if self.t is None or not self.t.winfo_exists():
+            t = self.t = tk.Toplevel(app.root)
+            t.overrideredirect(True)
+            t.attributes("-topmost", True)
+            self.lab = tk.Label(t, font=FONTS["head"], fg="#ffffff", padx=px(14), pady=px(5), bd=0)
+            self.lab.pack(padx=max(1, px(2)), pady=max(1, px(2)))
+            for w in (t, self.lab):
+                w.bind("<Button-1>", lambda e: self.hide())
+        self.t.configure(bg="#e8e0d0")
+        self.lab.configure(text=text, bg=flat_bg)
+        self.t.update_idletasks()
+        try:
+            x, y = self._place(self.t.winfo_reqwidth(), self.t.winfo_reqheight())
+            self.t.geometry("+%d+%d" % (x, y))
+        except Exception:
+            pass
+        self.t.deiconify()
+        self.t.lift()
+
+    def hide(self):
+        self._job = None
+        for w in (self.t, self.ct):
+            try:
+                if w is not None:
+                    w.withdraw()
+            except Exception:
+                pass
+
+
+MEZ_WORD = {"holds": "HELD", "held": "HELD", "stuns": "STUNNED", "stunned": "STUNNED", "sleeps": "ASLEEP",
+            "deep sleeps": "ASLEEP", "asleep": "ASLEEP", "terrifies": "TERRIFIED", "terrorizes": "TERRIFIED",
+            "terrified": "TERRIFIED", "confuses": "CONFUSED", "confused": "CONFUSED",
+            "immobilizes": "IMMOBILIZED"}
+
+
 class ColorPicker:
     """An eyedropper laid over the game window: a magnifier follows the mouse, a click on any game
     window's border takes its color. Right-click or Esc cancels."""
@@ -1808,6 +1931,7 @@ def _build_breakdown(app, seg, mode, key):
         if a is None:
             return None
         bd.title, bd.color, bd.kind = a.name, actor_color(a.name, a.kind), a.kind
+        bd.actor = a
         if app.cfg["time_measure"] == "active" and getattr(a, "active", 0) > 0:
             dur = bd.dur = max(1.0, min(a.active, dur))
         node = app.nodes.get(key)
@@ -3470,8 +3594,11 @@ class Breakdown(DarkWin):
         self.header.pack(side="top", fill="x")
         self.tabs = tk.Canvas(self.body, height=px(26), bg=C["bg"], highlightthickness=0, bd=0)
         self.tabs.pack(side="top", fill="x")
-        main = tk.Frame(self.body, bg=C["bg"])
+        main = self._main = tk.Frame(self.body, bg=C["bg"])
         main.pack(side="top", fill="both", expand=True)
+        self.graph = tk.Canvas(self.body, height=px(104), bg=C["bg"], highlightthickness=0, bd=0)
+        self.graph.bind("<Configure>", lambda e: self.draw_graph())
+        self._graph_on = False
         self.detail = tk.Canvas(main, width=px(300), bg=C["bg"], highlightthickness=0, bd=0)
         self.detail.pack(side="right", fill="y", padx=(px(4), px(6)), pady=(0, px(14)))
         self.table = tk.Canvas(main, bg=C["bg"], highlightthickness=0, bd=0)
@@ -3520,6 +3647,73 @@ class Breakdown(DarkWin):
         self.draw_tabs()
         self.draw_table()
         self.draw_detail()
+        want = (bool(app.cfg.get("bd_graph", True)) and self.mode in ("damage", "dps")
+                and getattr(self.data, "actor", None) is not None)
+        if want != self._graph_on:
+            self._graph_on = want
+            if want:
+                self.graph.pack(side="bottom", fill="x", padx=px(6), pady=(0, px(14)), before=self._main)
+            else:
+                self.graph.pack_forget()
+        if want:
+            self.draw_graph()
+
+    def draw_graph(self):
+        """Damage per second over the fight, smoothed over 5 seconds. Drawn only when the Breakdown
+        window refreshes, from per-second totals the parser already keeps: cheap on any PC."""
+        cv = self.graph
+        cv.delete("all")
+        d = self.data
+        a = getattr(d, "actor", None) if d is not None else None
+        W, H = cv.winfo_width(), cv.winfo_height()
+        if a is None or W < 80 or H < 40:
+            return
+        f = FONTS["small"]
+        left, top, right, bot = px(52), px(18), W - px(8), H - px(16)
+        cv.create_rectangle(left, top, right, bot, fill=C["menu_bg"], outline="")
+        tl = getattr(a, "timeline", None) or {}
+        cv.create_text(px(6), px(8), text="DPS over time", font=f, fill=C["gold"], anchor="w")
+        if not tl:
+            cv.create_text((left + right) // 2, (top + bot) // 2, text="No damage yet", font=f, fill=C["dim"])
+            return
+        step = max(1, int(getattr(a, "tl_step", 1)))
+        k0, k1 = min(tl), max(tl)
+        n = k1 - k0 + 1
+        vals = [tl.get(k0 + i, 0.0) for i in range(n)]
+        win = max(1, 5 // step)
+        out, acc = [], 0.0
+        for i, v in enumerate(vals):
+            acc += v
+            if i >= win:
+                acc -= vals[i - win]
+            out.append(acc / (min(i + 1, win) * step))
+        maxpts = max(8, (right - left) // 2)
+        if len(out) > maxpts:
+            k = len(out) / float(maxpts)
+            out = [max(out[int(i * k):max(int(i * k) + 1, int((i + 1) * k))]) for i in range(maxpts)]
+        if len(out) == 1:
+            out = out * 2
+        peak = max(out) or 1.0
+        avg = sum(vals) / float(n * step)
+        for frac in (0.5,):
+            y = bot - (bot - top) * frac
+            cv.create_line(left, y, right, y, fill=C["row_alt"], dash=(2, 3))
+        pts = []
+        for i, v in enumerate(out):
+            pts += [left + (right - left) * i / float(len(out) - 1), bot - (bot - top) * v / peak]
+        col = d.color or C["gold"]
+        cv.create_polygon([left, bot] + pts + [right, bot], fill=shade(col, 0.32), outline="")
+        cv.create_line(pts, fill=col, width=max(1, px(2)))
+        ya = bot - (bot - top) * min(1.0, avg / peak)
+        cv.create_line(left, ya, right, ya, fill=C["dim"], dash=(4, 3))
+        cv.create_text(left - px(4), top, text=fps(peak), font=f, fill=C["dim"], anchor="ne")
+        cv.create_text(left - px(4), bot, text="0", font=f, fill=C["dim"], anchor="se")
+        secs = int(n * step)
+        cv.create_text(left, bot + px(2), text="0:00", font=f, fill=C["dim"], anchor="nw")
+        cv.create_text(right - px(18), bot + px(2), text="%d:%02d" % (secs // 60, secs % 60), font=f, fill=C["dim"],
+                       anchor="ne")
+        cv.create_text(right, px(8), text="peak %s   average %s" % (fps(peak), fps(avg)), font=f,
+                       fill=C["text"], anchor="e")
 
     # --- header ----------------------------------------------------------
     def draw_header(self):
@@ -4153,7 +4347,7 @@ class BuildWin(DarkWin):
         self.build, self.error = None, ""
         if path:
             try:
-                self.build = mids.Build(path)
+                self.build = mids.load_build(path)
             except Exception as ex:
                 self.error = "Couldn't read %s (%s)" % (os.path.basename(path), ex)
         self.scroll = 0
@@ -4199,7 +4393,7 @@ class BuildWin(DarkWin):
         bar.pack(fill="x", padx=px(10), pady=(0, px(8)))
         self._btn(bar, "Link build \u25be", self.menu_link)
         if self.build is not None:
-            if mids.mids_exe():
+            if mids.mids_exe() and not self.build.path.lower().endswith(".skif"):
                 self._btn(bar, "Open in Mids", lambda e: self.open_in_mids())
             self._btn(bar, "Reload", lambda e: self.load())
         src = "Overall data" if self.app.cfg.get("build_source") != "view" else "Main window's segment"
@@ -4228,15 +4422,16 @@ class BuildWin(DarkWin):
             items.append({"label": os.path.splitext(os.path.basename(p))[0],
                           "right": time.strftime("%b %d", time.localtime(t)), "check": p == cur,
                           "cmd": lambda p=p: self.link(p)})
-        items += [{"sep": True}, {"label": "Browse for a .mbd file\u2026", "cmd": self.browse}]
+        items += [{"sep": True}, {"label": "Browse for a build file (.mbd or .skif)\u2026", "cmd": self.browse}]
         if self.char in (a.cfg.get("char_builds") or {}):
             items.append({"label": "Unlink (go back to auto-match)", "cmd": lambda: self.link(None)})
         DMenu(a, e.x_root, e.y_root, items, min_width=320)
 
     def browse(self):
-        p = filedialog.askopenfilename(parent=self.top, title="Choose a Mids build",
+        p = filedialog.askopenfilename(parent=self.top, title="Choose a build (Mids or CoH Sidekick)",
                                        initialdir=(mids.build_dirs() or [None])[0],
-                                       filetypes=[("Mids Reborn build", "*.mbd"), ("All files", "*.*")])
+                                       filetypes=[("Builds", "*.mbd *.skif"), ("Mids Reborn build", "*.mbd"),
+                                                  ("CoH Sidekick build", "*.skif"), ("All files", "*.*")])
         if p:
             self.link(p)
 
@@ -4344,14 +4539,25 @@ class BuildWin(DarkWin):
                              "colors": [C["dim"], C["text"], C["text"], C["dim"], lc], "bar": None, "tip": self._tip(r)})
             note = "Passive powers (Health, Stamina, most armors) never show in the log \u2014 that's normal."
         elif self.tab == 2:
-            cols = [("Proc", 0, "w"), ("Slotted in", 170, "w"), ("Fired", 60, "e"), ("Output", 76, "e"),
-                    ("Status", 170, "w")]
+            cols = [("Proc", 0, "w"), ("Slotted in", 170, "w"), ("Fired", 60, "e"), ("Rate", 110, "e"),
+                    ("Output", 76, "e"), ("Status", 120, "w")]
+            seg = self.segment()
+            mins = max(1.0 / 60, (seg.duration() if seg else 60.0) / 60.0)
             for p in procs:
                 ok = p["fires"] or p["output"]
-                rows.append({"cells": [p["proc"], p["power"], str(p["fires"] or "") or "\u2014",
+                fires = p["fires"] or 0
+                if fires and p.get("hits"):
+                    rate = "%d%% of hits" % round(100.0 * min(fires, p["hits"]) / p["hits"])
+                elif fires and p.get("uses"):
+                    rate = "%d%% of uses" % round(100.0 * min(fires, p["uses"]) / p["uses"])
+                elif fires:
+                    rate = "%.1f / min" % (fires / mins)
+                else:
+                    rate = ""
+                rows.append({"cells": [p["proc"], p["power"], str(fires or "") or "\u2014", rate,
                                        fmt(p["output"]) if p["output"] else "",
                                        "\u2714 firing" if ok else "not seen yet"],
-                             "colors": [C["text"], C["dim"], C["text"], C["text"],
+                             "colors": [C["text"], C["dim"], C["text"], C["text"], C["text"],
                                         C.get("green", "#5bd75b") if ok else C["gold"]], "bar": None, "tip": None})
             note = "Some procs (debuffs, Build Up, confusion) don't print a line in the log, so 'not seen' can be normal."
         else:
@@ -4741,7 +4947,7 @@ class OptionsWin(DarkWin):
              ("Bars: General", "page_bars"), ("Bars: Texts", "page_texts"),
              (None, None),
              ("Title Bar", "page_title"), ("Window Body", "page_body"), ("Statusbar", "page_status"),
-             ("Windows & Tabs", "page_windows"), ("Automation", "page_auto"), ("Tooltips", "page_tips"),
+             ("Windows & Tabs", "page_windows"), ("Automation", "page_auto"), ("Tooltips", "page_tips"), ("Alerts", "page_alerts"), ("Records", "page_records"),
              (None, None),
              ("Rename Powers", "page_rename")]
 
@@ -5037,9 +5243,50 @@ class OptionsWin(DarkWin):
             side="left", padx=px(6))
         self.button(row, "Logs Folder…", lambda: (a.browse_logs_dir(), self.update_log_label())).pack(side="left")
         self.check(0, "load_history", "Load earlier fights from today's log on start")
+        self.section(1, "Log Clean-up")
+        self.note(1, "The game keeps a chat log for every day you play and never removes them. Hero Meter can "
+                     "zip older logs (about 90% smaller, nothing is lost) and delete the zips once they're "
+                     "very old. Today's log and the one being read are never touched.")
+        self.check(1, "log_cleanup", "Clean up old chat logs automatically")
+        self.dropdown(1, "log_keep_days", "Keep logs unzipped for",
+                      [(3, "3 days"), (7, "1 week"), (14, "2 weeks"), (30, "1 month"), (90, "3 months")])
+        self.dropdown(1, "log_delete_days", "Delete zipped logs after",
+                      [(30, "1 month"), (90, "3 months"), (180, "6 months"), (365, "1 year"), (730, "2 years"),
+                       (0, "Never")])
+        self.log_stats = tk.Label(self.cols[1], text="", bg=C["bg"], fg=C["dim"], font=FONTS["small"],
+                                  anchor="w", justify="left", wraplength=px(330))
+        self.log_stats.pack(fill="x", pady=(px(4), px(2)))
+        row2 = tk.Frame(self.cols[1], bg=C["bg"])
+        row2.pack(fill="x", pady=px(4))
+        self.button(row2, "Clean up now", lambda: (self.log_stats.configure(text="Cleaning up\u2026"),
+                                                   a.log_cleanup(lambda r: self.update_log_stats(r)))).pack(
+            side="left")
+        dirs = a.log_dirs()
+        if dirs:
+            self.button(row2, "Open logs folder", lambda: os.startfile(dirs[0])).pack(side="left", padx=px(6))
+        self.update_log_stats(getattr(a, "_log_cleanup_result", None))
         self.note(0, "The game must have 'Log Chat' turned on (Options → Windows → Chat), and pet combat "
                      "channels added to a chat tab, for pet damage to show up.")
         self.update_log_label()
+
+    def update_log_stats(self, res=None):
+        lab = getattr(self, "log_stats", None)
+        try:
+            if lab is None or not lab.winfo_exists():
+                return
+        except Exception:
+            return
+        st = logmgr.stats(self.app.log_dirs())
+        mb = lambda b: "%.1f MB" % (b / 1048576.0) if b < 1073741824 else "%.2f GB" % (b / 1073741824.0)
+        txt = "Logs: %d (%s)    Zipped months: %d (%s)" % (st["logs"], mb(st["log_bytes"]), st["archives"],
+                                                            mb(st["archive_bytes"]))
+        if st["oldest"]:
+            txt += "\nOldest: %s" % st["oldest"].strftime("%b %Y")
+        if res:
+            txt += "\nLast clean-up: zipped %d log%s, saved %s, deleted %d old zip%s" % (
+                res["zipped"], "" if res["zipped"] == 1 else "s", mb(res["saved"]), res["deleted"],
+                "" if res["deleted"] == 1 else "s")
+        lab.configure(text=txt)
 
     def page_combat(self):
         self.section(0, "Death Recap")
@@ -5776,6 +6023,99 @@ class OptionsWin(DarkWin):
         self.slider(0, "tip_lines", "Lines (hold Shift for all)", 3, 30)
         self.dropdown(0, "tip_side", "Position", [("cursor", "Next to the mouse"), ("window", "Beside the meter")])
 
+    def page_alerts(self):
+        a = self.app
+        self.section(0, "Alerts")
+        self.note(0, "A short message pops up just above the meter when something needs your attention. "
+                     "It only reacts to what's happening now, never to old lines read when the meter starts.")
+        self.check(0, "alert_mez", "When you're held, stunned, slept, terrified or confused")
+        self.check(0, "alert_immob", "Also when you're immobilized (it happens a lot, so it's off at first)")
+        self.check(0, "alert_pet_dead", "When one of your pets is defeated")
+        self.check(0, "alert_pet_mez", "When one of your pets is held, stunned or slept")
+        self.check(0, "alert_sound", "Play a sound with each alert")
+        row = tk.Frame(self.cols[0], bg=C["bg"])
+        row.pack(fill="x", pady=px(6))
+        self.button(row, "Show a test alert",
+                    lambda: a.alert((time.time(), "mez", a.build_char(), "Test Enemy", "Holds", "Example Power"),
+                                    force=True)).pack(side="left")
+        self.section(0, "Breakdown")
+        self.check(0, "bd_graph", "Show the DPS-over-time graph in the Breakdown window",
+                   after=lambda: a.breakdown.refresh() if getattr(a, "breakdown", None) else None)
+
+    def page_records(self):
+        a = self.app
+        c = a.cfg
+        store = c.setdefault("records", {})
+        self.section(0, "Personal Records")
+        self.note(0, "Your best numbers for each character, from fights the meter saw live. A fight has to last "
+                     "a while to count for the per-second records, so one lucky crit can't set them.")
+        self.dropdown(0, "records_mode", "Records to keep", [("full", "Full list"), ("light", "Light (3 records)")],
+                      setter=lambda v: (a.set_cfg("records_mode", v), self.show_page("page_records")))
+        self.check(0, "records_popup", "Pop up when you set a new record")
+        self.check(0, "records_by_build", "Keep separate records for each linked build")
+        self.slider(0, "records_min_fight", "Min. fight length (sec)", 5, 60)
+        chars = sorted(store)
+        if not chars:
+            self.note(0, "No records yet. They start with your next fight.")
+            return
+        cur = getattr(self, "_rec_char", None)
+        if cur not in store:
+            pc = a.parser.player
+            cur = pc if pc in store else chars[0]
+        self._rec_char = cur
+        self.section(1, "Records")
+        self.dropdown(1, None, "Character", [(ch, ch) for ch in chars], getter=lambda: self._rec_char,
+                      setter=lambda v: (setattr(self, "_rec_char", v), self.show_page("page_records")))
+        entry = store[cur]
+        sets = entry.get("sets") or []
+        if not sets:
+            return
+        act = min(entry.get("active", 0), len(sets) - 1)
+        self.dropdown(1, None, "Record set", [(i, st["name"]) for i, st in enumerate(sets)], getter=lambda: act,
+                      setter=lambda v: (entry.__setitem__("active", v), a.save_cfg(), self.show_page("page_records")))
+        st = sets[act]
+        row = tk.Frame(self.cols[1], bg=C["bg"])
+        row.pack(fill="x", pady=px(4))
+        name = tk.Entry(row, bg=C["menu_bg"], fg=C["text"], insertbackground=C["text"], relief="flat",
+                        font=FONTS["ui"], width=24)
+        name.insert(0, st["name"])
+        name.pack(side="left", padx=(0, px(6)), ipady=px(2))
+
+        def rename():
+            t = name.get().strip()
+            if t:
+                st["name"] = t
+                a.save_cfg()
+                self.show_page("page_records")
+
+        def fresh():
+            records.start_fresh(store, cur)
+            a.save_cfg()
+            self.show_page("page_records")
+        self.button(row, "Rename", rename).pack(side="left")
+        self.button(row, "Start fresh", fresh).pack(side="left", padx=(px(6), 0))
+        self.note(1, "Start fresh keeps this set (pick it above to look back) and starts a new one, e.g. after a "
+                     "respec. Use the name to say which build it's for.")
+        grid = tk.Frame(self.cols[1], bg=C["bg"])
+        grid.pack(fill="x", pady=(px(6), 0))
+        for key in records.shown(c.get("records_mode", "full")):
+            r = st["rec"].get(key)
+            card = tk.Frame(grid, bg=C["block_head"])
+            card.pack(fill="x", pady=px(2))
+            tk.Label(card, text=records.LABEL[key], bg=C["block_head"], fg=C["dim"], font=FONTS["small"],
+                     anchor="w").pack(fill="x", padx=px(8), pady=(px(3), 0))
+            tk.Label(card, text=records.fmt(key, r["value"]) if r else "\u2014", bg=C["block_head"], fg=C["gold"],
+                     font=FONTS["head"], anchor="w").pack(fill="x", padx=px(8))
+            if r:
+                when = r["date"]
+                try:
+                    when = time.strftime("%b %d, %Y", time.strptime(r["date"], "%Y-%m-%d"))
+                except Exception:
+                    pass
+                info = "  \u2022  ".join(x for x in (r.get("detail"), when, r.get("zone")) if x)
+                tk.Label(card, text=info, bg=C["block_head"], fg=C["text"], font=FONTS["small"], anchor="w",
+                         justify="left", wraplength=px(330)).pack(fill="x", padx=px(8), pady=(0, px(4)))
+
     def page_rename(self):
         a = self.app
         self.section(0, "Rename / Merge Powers")
@@ -5952,6 +6292,7 @@ class App:
         self.root.after(1200, self.watch_login)
         self.root.after(5000, self.check_updates)
         self.root.after(4000, lambda: self.coh_detect_soon(8))
+        self.root.after(30000, self._log_cleanup_tick)
         if getattr(self, "_fresh_coh", False):      # first run on the new look: switch fonts + bar shape too
             self.root.after(300, lambda: self.set_skin("coh"))
 
@@ -6237,6 +6578,91 @@ class App:
             m.scroll = 0
         self.redraw(force=True)
         self.main.flash_title("Example bars " + ("on" if self.cfg["demo_mode"] else "off"), 2)
+
+    def alert(self, a, force=False):
+        """Show one alert from the parser: (ts, kind, who, ...)."""
+        c = self.cfg
+        now = time.time()
+        if not force and (now - a[0] > 12 or getattr(self, "logged_out", False)):
+            return                          # old news (e.g. lines read when the meter started)
+        kind = a[1]
+        if kind in ("mez", "mez_pet") and a[4] == "Immobilizes" and not c.get("alert_immob", False) and not force:
+            return
+        if kind == "mez":
+            if not c.get("alert_mez", True) and not force:
+                return
+            _who, src, verb, power = a[2:6]
+            word = MEZ_WORD.get(verb.lower(), verb.upper())
+            if not src and now - getattr(self, "_last_mez", 0) < 2.5:
+                return                      # "You are held!" right after "X Holds you with their Y"
+            if src:
+                self._last_mez = now
+            by = ("by %s" % src + (" (%s)" % power if power else "")) if src else ""
+            title, detail = word.title(), by
+            text = ("%s %s" % (word, by)) if src else "You are " + word
+            accent, flat_bg = (255, 96, 96), "#8a1622"
+        elif kind == "mez_pet":
+            if not c.get("alert_pet_mez", False):
+                return
+            pet, src, verb, power = a[2:6]
+            word = MEZ_WORD.get(verb.lower(), verb.upper())
+            title, detail = "%s %s" % (pet, word.title()), "by %s" % src + (" (%s)" % power if power else "")
+            text = "%s %s by %s" % (pet, word.lower(), src)
+            accent, flat_bg = (255, 190, 80), "#7a5410"
+        elif kind == "pet_dead":
+            if not c.get("alert_pet_dead", True):
+                return
+            pet, killer = a[2:4]
+            title, detail = "%s is down" % pet, "Defeated by %s" % killer
+            text = "%s is down (%s)" % (pet, killer)
+            accent, flat_bg = (205, 150, 255), "#5c2a78"
+        else:
+            return
+        if getattr(self, "toast", None) is None:
+            self.toast = Toast(self)
+        self.toast.show(title, detail, accent, text, flat_bg)
+        if c.get("alert_sound", False):
+            try:
+                import winsound
+                winsound.MessageBeep(0x30)
+            except Exception:
+                pass
+
+    # --- personal records ---------------------------------------------------------------
+    def records_build(self, char):
+        """Name of the build linked to a character (for 'separate records per build'), or None."""
+        try:
+            path = (self.cfg.get("char_builds") or {}).get(char) or mids.match_build(char, mids.find_builds())
+        except Exception:
+            path = None
+        return os.path.splitext(os.path.basename(path))[0] if path else None
+
+    def records_from(self, seg):
+        c = self.cfg
+        char = self.parser.player
+        if not char or char == "You":
+            return
+        res = records.measure(seg, char, float(c.get("records_min_fight", 20)))
+        if not res:
+            return
+        store = c.setdefault("records", {})
+        by_build = bool(c.get("records_by_build", False))
+        beaten = records.update(store, char, res, getattr(seg, "zone", ""),
+                                self.records_build(char) if by_build else None, by_build,
+                                c.get("records_mode", "full"))
+        if not beaten:
+            return
+        self.save_cfg()
+        if not c.get("records_popup", True):
+            return
+        key, v, old = beaten[0]
+        title = "New %s: %s" % (records.SHORT[key], records.fmt(key, v))
+        detail = ("Previous: %s" % records.fmt(key, old)) if old is not None else "First one for this character"
+        if len(beaten) > 1:
+            detail += "  \u2022  and %d more" % (len(beaten) - 1)
+        if getattr(self, "toast", None) is None:
+            self.toast = Toast(self)
+        self.toast.show(title, detail, (255, 205, 90), title + " (" + detail + ")", "#7a5a10", secs=4)
 
     def pick_game_color(self):
         """Eyedropper: you click a game window's border and that exact color is used (and remembered
@@ -6782,6 +7208,75 @@ class App:
         if self.options:
             self.options.update_log_label()
 
+    # --- chat log clean-up ---------------------------------------------------------
+    def log_dirs(self):
+        """Every chat log folder we know about (each account's Logs folder)."""
+        import glob as _g
+        out = []
+        root = None
+        try:
+            root = self.game_root()
+        except Exception:
+            pass
+        if root:
+            out += _g.glob(os.path.join(root, "accounts", "*", "Logs"))
+        for p in (self.cfg.get("logs_dir"), os.path.dirname(self.log_path) if self.log_path else None):
+            if p and os.path.basename(os.path.normpath(p)).lower() == "logs":
+                out.append(p)
+        seen, res = set(), []
+        for p in out:
+            k = os.path.normcase(os.path.abspath(p))
+            if k not in seen and os.path.isdir(p):
+                seen.add(k)
+                res.append(p)
+        return res
+
+    def _log_cleanup_tick(self):
+        try:
+            if self.cfg.get("log_cleanup", True) and self.cfg.get("log_cleanup_last") != time.strftime("%Y-%m-%d"):
+                self.log_cleanup()
+        finally:
+            self.root.after(30 * 60 * 1000, self._log_cleanup_tick)
+
+    def log_cleanup(self, done=None):
+        """Zip old chat logs / delete old zips in the background (never today's or the one being read)."""
+        if getattr(self, "_log_cleaning", False):
+            return
+        self._log_cleaning = True
+        dirs = self.log_dirs()
+        keep = int(self.cfg.get("log_keep_days", 7))
+        dele = int(self.cfg.get("log_delete_days", 180))
+        active = self.log_path
+        import threading
+
+        def work():
+            try:
+                res = logmgr.run(dirs, keep, dele, active)
+            except Exception:
+                res = None
+            self.root.after(0, lambda: finish(res))
+
+        def finish(res):
+            self._log_cleaning = False
+            self.cfg["log_cleanup_last"] = time.strftime("%Y-%m-%d")
+            if res is not None:
+                self._log_cleanup_result = res
+                self.save_cfg()
+                if res["zipped"] or res["deleted"]:     # say what was done, so nothing happens silently
+                    if getattr(self, "toast", None) is None:
+                        self.toast = Toast(self)
+                    bits = []
+                    if res["zipped"]:
+                        bits.append("zipped %d old log%s" % (res["zipped"], "" if res["zipped"] == 1 else "s"))
+                    if res["deleted"]:
+                        bits.append("deleted %d old zip%s" % (res["deleted"], "" if res["deleted"] == 1 else "s"))
+                    detail = ", ".join(bits) + " (Options \u2192 Log File)"
+                    self.toast.show("Chat logs tidied", detail[0].upper() + detail[1:], (120, 200, 255),
+                                    "Chat logs tidied: " + detail, "#1f4f7a", secs=6)
+            if done:
+                done(res)
+        threading.Thread(target=work, daemon=True).start()
+
     def browse_logs_dir(self):
         d = filedialog.askdirectory(parent=self.root, title="Choose your Homecoming Logs folder",
                                     initialdir=self.logs_dir() or self.cfg.get("game_dir") or app_dir())
@@ -6955,6 +7450,10 @@ class App:
                  "Mids: %s   builds found: %d" % ("yes" if mids.mids_exe() else "no", len(builds)),
                  "Theme: %s  Skin: %s  Profile: %s  Windows: %d" % (self.cfg.get("bar_theme"), self.cfg.get("skin"),
                                                                     self.cfg.get("active_profile"), len(self.meters))]
+        up = sorted((getattr(self.parser, "unplaced", None) or {}).items(), key=lambda kv: -kv[1])
+        up = [(k, v) for k, v in up if k not in self.parser.typer.known][:15]
+        lines.append("Pets the meter couldn't place (possible pseudo pets): %s" % (
+            ", ".join("%s (%d)" % kv for kv in up) if up else "none"))
         try:
             with open(ERROR_LOG, "r", encoding="utf-8", errors="replace") as fh:
                 tail = fh.read()[-3000:]
@@ -7595,6 +8094,20 @@ class App:
 
     def poll(self):
         backlog = False
+        al = getattr(self.parser, "alerts", None)
+        while al:
+            try:
+                self.alert(al.popleft())
+            except Exception:
+                pass
+        jc = getattr(self.parser, "just_closed", None)
+        while jc:
+            seg = jc.popleft()
+            try:
+                if self.tail and self.tail.done and time.time() - seg.last < 300:   # live fights only
+                    self.records_from(seg)
+            except Exception:
+                pass
         pend = getattr(self, "_coh_pending", None)
         if pend is not None:
             self._coh_pending = None

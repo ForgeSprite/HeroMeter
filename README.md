@@ -32,7 +32,7 @@ Click a bar to see that character's powers. Right-click to go back.
 
 ![Drilling into one character's powers](docs/screenshots/drilldown.png)
 
-Shift+click a bar for the full breakdown: every power with hits, averages, the biggest hit, accuracy, damage types and targets.
+Shift+click a bar for the full breakdown: every power with hits, averages, the biggest hit, accuracy, damage types and targets, plus a DPS-over-time graph of the fight with its peak and average.
 
 ![The breakdown window](docs/screenshots/breakdown.png)
 
@@ -47,6 +47,18 @@ Hero Meter works out what each of your pets is, even after you rename them, and 
 When you die, the recap shows the last few seconds hit by hit: who killed you, with what, how much each enemy did and how long you lasted. It works much like the recap in a MOBA.
 
 ![Death recap](docs/screenshots/death-recap.png)
+
+### Alerts
+
+A short pop-up above the meter tells you when you're held, stunned, slept, terrified or confused (and by whom, with what), or when one of your pets is defeated. Immobilize alerts, pet mez alerts and a sound can be switched on in **Options → Alerts**. The pop-up matches the skin you're using.
+
+![A hold alert in the City of Heroes skin](docs/screenshots/alerts.png)
+
+### Personal records
+
+Hero Meter keeps each character's best numbers from fights it saw live: biggest hit, best fight DPS, most damage in one fight, best DPS with your pets, most kills, best healing per second and the longest fight you survived (or just the first three, if you prefer the light list). A pop-up tells you when you beat one. Records live in **Options → Records**, where you can rename a set or **Start fresh** after a respec, and optionally keep separate records for each linked build.
+
+![Personal records](docs/screenshots/records.png)
 
 ### Make it look how you want
 
@@ -74,13 +86,13 @@ When you die, the recap shows the last few seconds hit by hit: who killed you, w
 
 Hero Meter knows which character you're on. When you go to character select, it goes back to "You" until the next character logs in. If that character doesn't have Log Chat turned on, the meter tells you within a few seconds and gives you the `/logchat` command to paste.
 
-### Mids' Reloaded builds
+### Your build vs. what you actually do
 
-If you plan builds in Mids Reborn, link a build to your character. Save the build as `CharacterName - anything.mbd` and it links itself. Then Hero Meter compares the plan with what you actually do in game:
+If you plan builds in **Mids Reborn** or **CoH Sidekick**, link a build to your character. Save it as `CharacterName - anything.mbd` (Mids) or `CharacterName - anything.skif` (Sidekick) and it links itself. Then Hero Meter compares the plan with what you actually do in game:
 
 - **Value Ranking**: which powers do the work, and which ones have a lot of slots for very little output.
 - **Planned vs Actual**: every power in the build, what's slotted in it, and whether the log shows you using it.
-- **Procs**: whether the procs you slotted are actually firing.
+- **Procs**: whether the procs you slotted are actually firing, and how often.
 - **Not in Build**: powers you use that aren't in the build. This usually means a respec, or the wrong build is linked.
 
 ![Value Ranking for a linked build](docs/screenshots/mids-value.png)
@@ -91,9 +103,15 @@ The chat log can only show so much. Passive powers like Health and Stamina never
 
 ---
 
+### Chat log clean-up
+
+The game writes a chat log for every day you play and never removes them, so they add up to hundreds of megabytes over time. Hero Meter zips logs older than a week into one archive per month (about 90% smaller, nothing is lost) and deletes archives older than six months. Both ages can be changed in **Options → Log File**, deleting can be set to **Never**, and today's log is never touched. A fresh zip is never deleted in its first two weeks.
+
+![Log clean-up settings](docs/screenshots/log-cleanup.png)
+
 ## Privacy
 
-Hero Meter only reads files on your own PC: your chat logs, your account's character list, the game's fonts and, if you have Mids, your builds. To match your window color it looks at the game window, only while City of Heroes is the window in front, and keeps nothing but the color it found. Nothing gets uploaded. The one thing it does online is check GitHub for a newer version, and you can turn that off under **⚙ → About Hero Meter**.
+Hero Meter only reads files on your own PC: your chat logs, your account's character list, the game's fonts and your Mids or Sidekick builds. The only files it changes are old chat logs, when Log clean-up zips or removes them. To match your window color it looks at the game window, only while City of Heroes is the window in front, and keeps nothing but the color it found. Nothing gets uploaded. The one thing it does online is check GitHub for a newer version, and you can turn that off under **⚙ → About Hero Meter**.
 
 Settings are saved in `%APPDATA%\Hero Meter`. To keep everything next to the exe instead (handy on a USB stick), put an empty file named `portable.txt` beside `HeroMeter.exe`.
 
@@ -120,7 +138,7 @@ To release a new version: bump `VERSION` in `src/meter.py`, add a note to `CHANG
 - Inspired by **Details! Damage Meter** for World of Warcraft.
 - **Oswald** font by Vernon Adams and contributors, under the SIL Open Font License (see `src/fonts/OFL.txt`).
 - The City of Heroes skin uses the game's own fonts, read from your Homecoming install. They aren't included with Hero Meter. Until the game is found, a similar Windows font stands in.
-- Build data and enhancement names come from your own **Mids Reborn** install, when you have one.
+- Build data, power names and enhancement names come from your own **Mids Reborn** install, when you have one. Builds from **[CoH Sidekick](https://coh-sidekick.com)** can be linked too.
 - The list of oddly named pseudo pets started from the one in **[Cyclops](https://github.com/PaulBenHill/cyclops)** by Paul Benjamin Hill (Apache 2.0).
 - The screenshots use made-up demo characters.
 

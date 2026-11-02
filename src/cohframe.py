@@ -479,6 +479,28 @@ def render_menu(items, look, w, h, hover=-1, alpha=0.78):
 
 
 
+def render_toast(title, detail, accent, look):
+    """An alert in the game's menu style: the same see-through rounded panel, a colored strip on the
+    left, the alert in its color and the details in the menu's light cyan. Kept compact."""
+    pad = max(5, int(round(look.pad * 0.75)))
+    bar = max(3, int(round(6 * look.sc)))
+    x = pad + bar + max(5, int(round(look.pad * 0.7)))
+    tf, df = look.font, look.small
+    th = int(round(look.ih * 0.72))
+    dh = int(round(look.ih * 0.62)) if detail else 0
+    tw = tf.getlength(title)
+    dw = df.getlength(detail) if detail else 0
+    w = int(x + max(tw, dw) + pad * 1.6)
+    h = pad * 2 + th + dh
+    img, _ = render_menu([], look, w, h)
+    d = ImageDraw.Draw(img)
+    d.rounded_rectangle((pad, pad + 1, pad + bar, h - pad - 1), bar // 2, fill=tuple(accent[:3]) + (255,))
+    _otext(d, (x, pad + th // 2), title, tf, accent, "lm", look.ow)
+    if detail:
+        _otext(d, (x, pad + th + dh // 2), detail, df, MENU_TEXT, "lm", look.ow)
+    return img
+
+
 _PREVIEWS = {}
 
 

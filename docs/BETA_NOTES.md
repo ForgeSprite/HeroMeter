@@ -11,6 +11,18 @@ If Windows says **"Windows protected your PC"**, click **More info → Run anywa
 signing certificate always get that warning. This file was built by GitHub from the code in this repo, and its
 SHA-256 checksum is in `SHA256.txt` below.
 
+### New in beta.4
+
+- **Alerts**: a pop-up above the meter when you're held, stunned, slept, terrified or confused, or a pet is
+  defeated. Immobilize, pet mez and sound are optional (**Options → Alerts**).
+- **Personal records** for each character, with a pop-up when you beat one (**Options → Records**).
+- **DPS over time** graph in the Breakdown window.
+- **Proc fire rates** in Mids' Build → Procs.
+- **CoH Sidekick builds** (`.skif`) work just like Mids builds.
+- **Chat log clean-up**: old logs are zipped after a week and the zips deleted after six months (both
+  changeable, or set to Never). Nothing is deleted in the first two weeks.
+- Build powers show their in-game names, so more of them match your log.
+
 ### New in beta.3
 
 - **Pseudo pets count as your damage.** Rain of Fire, Caltrops, Burn, Chain Induction, Lightning Rod, the

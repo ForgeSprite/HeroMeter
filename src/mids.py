@@ -101,7 +101,7 @@ def find_builds():
         except OSError:
             continue
         for fn in names:
-            if not fn.lower().endswith(".mbd"):
+            if not fn.lower().endswith((".mbd", ".skif")):
                 continue
             p = os.path.join(d, fn)
             key = fn.lower()
@@ -200,12 +200,45 @@ def is_proc(uid):
             or "contagious" in n)
 
 
+_PW = None
+
+
+def power_names():
+    """'Mastermind_Summon.Necromancy.Skeletal_Warriors' (lower case) -> 'Grave Knight', from Mids' power
+    database. Builds store a power's internal name; the chat log uses the name you see in game."""
+    global _PW
+    if _PW is not None:
+        return _PW
+    _PW = {}
+    st = mids_settings()
+    data = _find_key(st, "DataPath") or os.path.join(MIDS_DIR, "Databases", "Homecoming")
+    try:
+        with open(os.path.join(data, "I12.mhd"), "rb") as fh:
+            ss = _net_strings(fh.read())
+    except Exception:
+        return _PW
+    for i in range(len(ss) - 4):
+        full = ss[i]
+        if full.count(".") != 2 or " " in full:
+            continue
+        g, s, n = full.split(".")
+        if ss[i + 1] == g and ss[i + 2] == s and ss[i + 3] == n:
+            disp = ss[i + 4]
+            if disp and "_" not in disp and len(disp) < 60:
+                _PW.setdefault(full.lower(), disp)
+    return _PW
+
+
+def display_name(full):
+    return power_names().get((full or "").lower()) or nice(full)
+
+
 # ---------------------------------------------------------------------------------- builds
 class PlannedPower:
     def __init__(self, level, full, slots):
         self.level = level
         self.full = full
-        self.name = nice(full)
+        self.name = display_name(full)
         self.key = norm(self.name)
         self.set = set_label(full)
         self.group = full.split(".")[0] if full else ""
@@ -262,6 +295,103 @@ class Build:
         return out
 
 
+def load_build(path):
+    """A Mids (.mbd) or CoH Sidekick (.skif) build."""
+    return SkifBuild(path) if path.lower().endswith(".skif") else Build(path)
+
+
+def _build_name(path):
+    try:
+        with open(path, "r", encoding="utf-8-sig") as fh:
+            d = json.load(fh)
+        return (d.get("Name") or (d.get("build") or {}).get("name") or "") if isinstance(d, dict) else ""
+    except Exception:
+        return ""
+
+
+_UIDS = None
+
+
+def _uid_index():
+    global _UIDS
+    if _UIDS is None:
+        _UIDS = {u.lower(): u for u in enh_names()}
+    return _UIDS
+
+
+def skif_uid(slot):
+    """A Sidekick slot ({'type': 'io-set', 'setId': 'apocalypse', 'pieceNum': 6, ...}) as a Mids-style uid,
+    so set names, piece names and procs come out the same as for a Mids build."""
+    t = slot.get("type")
+    if t == "io-set":
+        sid = (slot.get("setId") or "").lower()
+        letter = "ABCDEFGH"[max(0, min(7, int(slot.get("pieceNum") or 1) - 1))]
+        base = sid[len("superior_"):] if sid.startswith("superior_") else sid
+        idx = _uid_index()
+        cands = (["superior_attuned_%s_%s", "superior_%s_%s", "attuned_%s_%s"] if sid.startswith("superior_")
+                 else ["crafted_%s_%s", "%s_%s", "attuned_%s_%s"])
+        for c in cands:
+            u = idx.get(c % (base, letter.lower()))
+            if u:
+                return u
+        return "Crafted_%s_%s" % ("_".join(w.capitalize() for w in base.split("_")), letter)
+    if t == "io-generic":
+        return "Crafted_" + (slot.get("stat") or "IO").replace(" ", "_")
+    if t == "special":
+        cat = (slot.get("category") or "").replace("d-sync", "D-Sync").replace("-", " ").title().replace("D Sync", "D-Sync")
+        return "%s (%s)" % ((slot.get("id") or "Special").replace("-", " ").title(), cat) if cat else \
+            (slot.get("id") or "Special").title()
+    return slot.get("id") or slot.get("name") or "Enhancement"
+
+
+class SkifBuild(Build):
+    """A CoH Sidekick build file (.skif, JSON 'version' 5): same shape as a Mids build to the rest of the app."""
+
+    def __init__(self, path):
+        self.path = path
+        with open(path, "r", encoding="utf-8-sig") as fh:
+            d = json.load(fh)
+        self.raw = d
+        b = d.get("build") or {}
+        self.name = b.get("name") or os.path.splitext(os.path.basename(path))[0]
+        self.archetype = (b.get("archetype") or "").replace("_", " ").title()
+        self.level = b.get("level")
+        groups = [("primary", b.get("primary")), ("secondary", b.get("secondary"))]
+        groups += [("pool", p) for p in (b.get("pools") or [])]
+        groups += [("epic", b.get("epicPool"))]
+        self.sets = []
+        for kind, g in groups[:2]:
+            if g and g.get("id"):
+                self.sets.append(g["id"].split("/")[-1].replace("_", " ").replace("-", " ").title())
+        names = power_names()
+        by_internal = {}
+        for full in names:
+            by_internal.setdefault(full.rsplit(".", 1)[-1], []).append(full)
+        self.powers = []
+
+        def resolve(internal, set_id, group):
+            at = (b.get("archetype") or "").lower()
+            cands = sorted(by_internal.get((internal or "").lower(), []), key=lambda f: not f.startswith(at))
+            want = norm((set_id or "").split("/")[-1])
+            for f in cands:
+                if want and (norm(f.split(".")[1]) == want or want.endswith(norm(f.split(".")[1]))):
+                    return f
+            if cands:
+                return cands[0]
+            return "%s.%s.%s" % (group, (set_id or group).split("/")[-1], internal)
+        for kind, g in groups:
+            if not g:
+                continue
+            for pw in g.get("powers") or []:
+                full = resolve(pw.get("internalName"), g.get("id"), kind.title())
+                slots = [skif_uid(sl) for sl in (pw.get("slots") or [])]
+                self.powers.append(PlannedPower(int(pw.get("level") or 0), full, slots))
+        for pw in b.get("inherents") or []:
+            full = "Inherent.Inherent.%s" % pw.get("internalName")
+            slots = [skif_uid(sl) for sl in (pw.get("slots") or [])]
+            self.powers.append(PlannedPower(int(pw.get("level") or 0), full, slots))
+
+
 def match_build(char, builds):
     """Best build file for a character name: filename 'Name - ...' or the build's own name."""
     if not char or char == "You":
@@ -272,12 +402,8 @@ def match_build(char, builds):
         if base.startswith(c + " - ") or base.startswith(c + " (") or os.path.splitext(base)[0] == c:
             return p
     for p, _t in builds:
-        try:
-            with open(p, "r", encoding="utf-8-sig") as fh:
-                if (json.load(fh).get("Name") or "").lower().strip() == c:
-                    return p
-        except Exception:
-            pass
+        if _build_name(p).lower().strip() == c:
+            return p
     return None
 
 
@@ -370,6 +496,8 @@ def analyze(build, actor):
                                        "log": hit["full"] if hit else ""}
                 procs.append(pr)
             pr["powers"].append(r.name)
+            pr["hits"] = pr.get("hits", 0) + (r.hits or 0)
+            pr["uses"] = pr.get("uses", 0) + (r.uses or 0)
             r.procs.append(pr)
     for pr in procs:
         pr["power"] = ", ".join(pr["powers"])

@@ -2,6 +2,40 @@
 
 All notable changes to Hero Meter are listed here, newest first.
 
+## v2.0.0-beta.4
+
+### New
+- **DPS over time graph** in the Breakdown window: damage per second across the fight (smoothed over
+  5 seconds), with the peak and the average marked. It's drawn from per-second totals the meter already
+  keeps, only when the window refreshes, so it's light on low-end PCs. It can be turned off under
+  **Options → Alerts**.
+- **Alerts**: a short message pops up above the meter when you're held, stunned, slept, terrified or
+  confused (with who did it and with what), or when one of your pets is defeated. Immobilize alerts, pet
+  mez alerts and a sound can be turned on under **Options → Alerts**. Only new events trigger alerts, never old log lines.
+  Alerts follow the skin: a see-through game-menu panel in the City of Heroes skin, a flat banner in Details!.
+- **Chat log clean-up** (Options → Log File). The game never removes its daily chat logs, so they pile up
+  (hundreds of MB over time). Logs older than a week are zipped into one archive per month (about 90% smaller,
+  nothing lost), and archives older than six months are deleted (never a zip in its first two weeks, so
+  nothing disappears the first time it runs). Both ages can be changed, deleting can be set
+  to Never, and today's log and the one being read are never touched. It runs in the background at most once
+  a day, and there's a Clean up now button.
+- **Personal records** (Options → Records): each character's biggest hit, best fight DPS, most damage, best
+  DPS with pets, most kills, best HPS and longest fight survived, from live fights only (or a light list of the
+  first three). A pop-up announces a new record. Record sets can be renamed or started fresh after a respec,
+  and can optionally follow the linked build.
+- **Copy diagnostics** lists pets the meter couldn't place, to help track down unusual pseudo pets.
+- **CoH Sidekick builds** work like Mids builds: link a `.skif` file (or name it `CharacterName - anything.skif`)
+  and Mids' Build shows Value Ranking, Planned vs Actual, Procs and Not in Build for it.
+- **Proc fire rate** in Mids' Build → Procs: how often each proc fired, as a share of the hits (or uses) of
+  the powers it's slotted in, or per minute for procs in passives and toggles.
+
+### Fixed
+- Shields granted by pseudo pets are credited to you, like their damage and heals.
+- Enemy attacks logged as "was autohit" now count in your avoidance numbers (teammates' buffs, which use the
+  same wording, are left out).
+- Build powers now show their in-game names (Grave Knight, Barrier Reef, Whirling Smash...) instead of the
+  internal names in the build file, so they match what the chat log says.
+
 ## v2.0.0-beta.3
 
 ### Fixed

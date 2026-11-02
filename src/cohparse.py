@@ -39,6 +39,9 @@ R_XP = re.compile(r"^You gain " + NUM + r" experience")
 R_ZONE = re.compile(r"^Entering (.+?)\.$")
 R_SEEN = re.compile(r"Your (.+?) (?:power is autohit|has made you|has |is recharged)|You activated the (.+?) power"
                     r"|with your (.+?) (?:for [\d.]|granting)|^(.+?) is recharged")
+R_MEZ = re.compile(r"^(.+?) (Holds|Stuns|Sleeps|Deep Sleeps|Terrifies|Terrorizes|Confuses|Immobilizes) you with their (.+?)\.?$")
+R_YOU_MEZ = re.compile(r"^You are (held|stunned|asleep|terrified|confused)!$")
+R_DEFEATS = re.compile(r"^(.+?) has defeated (.+?)\.?$")
 R_ACTIVATE = re.compile(r"^You activated the (.+?) power\.?$")
 R_NAME = re.compile(r"^(?:Welcome to City of Heroes|Now entering .+?), (.+?)!$")
 R_DEATH = re.compile(r"(brink of death|You have been defeated|You were defeated|You are defeated|"
@@ -70,6 +73,8 @@ PSEUDO_RES = [(re.compile(p), m, need) for p, m, need in PSEUDO_PETS]
 _RE_OWN_DMG = re.compile(r"^(You hit .+? with your ).+?( for [\d,.]+ points? of )")
 _RE_OWN_HIT = re.compile(r"^((?:HIT|MISSED) .+?!+ Your ).+?( power )")
 _RE_OWN_HEAL = re.compile(r"^(You heal .+? with ).+?( for [\d,.]+ health)")
+_RE_OWN_ABS = re.compile(r"^(You grant .+? [\d,.]+ points? of absorption(?: over time)? with ).+?(\.?)$")
+R_EAUTO = re.compile(r"^(.+?) HITS you! (.+?) power was autohit\.?$")
 
 
 def num(s):
@@ -228,6 +233,8 @@ class Actor:
         self._last_act = None
         self.recent = collections.deque(maxlen=600)    # (ts, damage) for real-time DPS
         self.activations = {}           # power -> times activated (player only)
+        self.timeline = {}              # time bucket -> damage (for the DPS graph)
+        self.tl_step = 1                # seconds per bucket
         self.seen = {}                  # power -> times the log mentioned it (toggles, autohits, buffs)
 
     def touch(self, ts):
@@ -257,6 +264,11 @@ class Actor:
         self.protect += o.protect
         self.protect_n += o.protect_n
         self.xp += o.xp
+        tl = getattr(o, "timeline", None)
+        if tl:
+            self.tl_step = getattr(o, "tl_step", 1)
+            for k, v in tl.items():
+                self.timeline[k] = self.timeline.get(k, 0.0) + v
         self.rolls += o.rolls
         self.roll_hits += o.roll_hits
         self.chance_sum += o.chance_sum
@@ -371,6 +383,13 @@ class Parser:
         self.player = "You"
         self.typer = pettypes.PetTyper()
         self.my_powers = set()          # powers you've activated (to spot pseudo pets named after them)
+        self.alerts = collections.deque(maxlen=60)   # (ts, kind, ...) for on-screen alerts
+        self.just_closed = collections.deque(maxlen=30)   # fights that just ended (for personal records)
+        self.zone = ""
+        self._pet_seen = {}             # pet name -> last time it fought
+        self._enemy_seen = {}           # enemy name -> last time you or a pet hit it
+        self._foe_seen = {}             # name -> last time it damaged you or a pet
+        self.unplaced = {}              # pet names that aren't henchmen or known pseudo pets -> lines seen
         self.my_chars = set()           # every character name on the account (playerslot.txt)
         self.renames = {}               # power name -> merged / renamed name
         self.dot_separate = False       # list damage-over-time ticks as "<power> (DoT)"
@@ -426,6 +445,8 @@ class Parser:
             self.current = None
             return
         self.overall._duration += c.duration()
+        c.zone = self.zone
+        self.just_closed.append(c)
         self.current = None
         self.version += 1
 
@@ -482,6 +503,9 @@ class Parser:
                     actor_name, kind = self.player, "player"
                 else:
                     self.typer.on_pet_line(actor_name, body, ts)
+                    self._pet_seen[actor_name] = ts
+                    if actor_name not in self.typer.known and body.startswith("You hit "):
+                        self.unplaced[actor_name] = self.unplaced.get(actor_name, 0) + 1
         try:
             if kind == "player" and ("our " in body or body.endswith(" is recharged.")):
                 sm = R_SEEN.search(body)
@@ -508,7 +532,7 @@ class Parser:
     @staticmethod
     def _as_own(body, power):
         f = lambda m: m.group(1) + power + m.group(2)
-        for rx in (_RE_OWN_DMG, _RE_OWN_HIT, _RE_OWN_HEAL):
+        for rx in (_RE_OWN_DMG, _RE_OWN_HIT, _RE_OWN_HEAL, _RE_OWN_ABS):
             if rx.match(body):
                 return rx.sub(f, body, 1)
         return body
@@ -534,9 +558,14 @@ class Parser:
                     a.touch(ts)
                     a.recent.append((ts, amt))
                     _get(a.powers, power).add(amt, bool(dot), flair, dtype, target)
+                    step = 5 if seg.is_overall else 1
+                    b = int(ts) // step
+                    a.timeline[b] = a.timeline.get(b, 0.0) + amt
+                    a.tl_step = step
                     e = seg.enemy(target)
                     e.received += amt
                     _get(e.received_by, (who, power)).add(amt, bool(dot), flair, dtype)
+                self._enemy_seen[target] = ts
                 self.version += 1
                 return
         if c0 == "H" and body.startswith("HIT "):
@@ -576,6 +605,7 @@ class Parser:
             if m:
                 src, power, amt, dtype, dot, flair = m.groups()
                 amt = num(amt)
+                self._foe_seen[src] = ts
                 if self._learn_self(src) and kind == "player":
                     who = self.player
                 for seg in self._targets(ts):
@@ -599,6 +629,20 @@ class Parser:
                     a.def_rolls += 1
                     _get(a.taken_by, (src, power)).add_roll(True, chance)
                 self.version += 1
+                return
+        if " HITS you! " in body and body.endswith("was autohit."):
+            m = R_EAUTO.match(body)
+            if m:
+                src, power = m.groups()
+                # the same wording is used for teammates' buffs, so only count someone who has been
+                # fighting you (or that you've been fighting) in the last two minutes
+                seen = max(self._foe_seen.get(src, 0), self._enemy_seen.get(src, 0))
+                if ts - seen < 120 and not self._is_friendly_name(src):
+                    for seg in self._targets(ts):
+                        a = seg.actor(who, kind)
+                        a.def_rolls += 1
+                        _get(a.taken_by, (src, power)).add_roll(True, None)
+                    self.version += 1
                 return
         if " MISSES! " in body:
             m = R_EMISS.match(body)
@@ -732,6 +776,7 @@ class Parser:
                 if not hasattr(self, "zones"):
                     self.zones = set()
                 self.zones.add(zm.group(1).strip())
+                self.zone = zm.group(1).strip()
             if zm and self.overall_clear == "zone":
                 self.clear_overall()
             return
@@ -744,6 +789,27 @@ class Parser:
                 for seg in self._targets(ts, combat=False):
                     a = seg.actor(who, kind)
                     a.activations[power] = a.activations.get(power, 0) + 1
+                return
+        # --- crowd control on you or a pet, and pets going down (for alerts) ---------
+        if " you with their " in body:
+            m = R_MEZ.match(body)
+            if m:
+                self.alerts.append((ts, "mez_pet" if kind == "pet" else "mez", who) + m.groups())
+                return
+        if kind == "player" and body.startswith("You are ") and body.endswith("!"):
+            m = R_YOU_MEZ.match(body)
+            if m:
+                self.alerts.append((ts, "mez", who, "", m.group(1), ""))
+                return
+        if kind == "player" and " has defeated " in body:
+            m = R_DEFEATS.match(body)
+            if m:
+                killer, victim = m.groups()
+                seen = self._pet_seen.get(victim)
+                foe = self._enemy_seen.get(victim)
+                if seen is not None and ts - seen < 120 and (foe is None or ts - foe > 120):
+                    self._pet_seen.pop(victim, None)
+                    self.alerts.append((ts, "pet_dead", victim, killer))
                 return
         if R_DEATH.search(body):
             self.record_death(who, ts, body)
