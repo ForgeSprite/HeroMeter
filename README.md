@@ -6,6 +6,8 @@ A damage meter for City of Heroes (Homecoming), modeled on Details! from World o
 
 It reads your chat log while you play and shows damage, healing, deaths and pet numbers in a small window on top of the game. Out of the box it looks like one of the game's own windows, in your own window color. It's one `.exe` with no installer. It's free, and the code is open source.
 
+New to Hero Meter, or looking for a setting? The **[user guide](docs/USER_GUIDE.md)** covers every option with its default, plus troubleshooting. You can also open it from the meter with **⚙ → User Guide**.
+
 ![Two Hero Meter windows snapped together](docs/screenshots/meter-windows.png)
 
 ---
@@ -15,6 +17,7 @@ It reads your chat log while you play and shows damage, healing, deaths and pet 
 1. Download **`HeroMeter.exe`** from the [latest release](../../releases/latest).
 2. Put it wherever you like (Desktop, Downloads, a tools folder) and double-click it.
 3. In the game, turn on chat logging for each character: **Menu → Options → Windows → Chat → Log Chat**. You can also type `/logchat` once in the chat box.
+4. If you use pets, or powers like Rain of Fire, Caltrops or Burn that fight through an invisible pet, add the **Pet** channels to a chat tab once per character: right-click a chat tab, choose **Edit Tab**, and add Pet Combat, Pet Damage Inflicted, Pet Damage Received, Pet Hit Rolls, Pet Healing Delivered and Pet Healing Received. The game only logs channels that are in a tab, and Hero Meter tells you if it notices pet damage is missing.
 
 The meter looks for Homecoming on its own. If the game is running, it reads the install folder from the game itself. If not, it checks the usual install folders on each drive. If it still can't find it, click the meter and point it at your Homecoming folder. It only asks once.
 
@@ -105,7 +108,7 @@ The chat log can only show so much. Passive powers like Health and Stamina never
 
 ### Chat log clean-up
 
-The game writes a chat log for every day you play and never removes them, so they add up to hundreds of megabytes over time. Hero Meter zips logs older than a week into one archive per month (about 90% smaller, nothing is lost) and deletes archives older than six months. Both ages can be changed in **Options → Log File**, deleting can be set to **Never**, and today's log is never touched. A fresh zip is never deleted in its first two weeks.
+The game writes a chat log for every day you play and never removes them, so they add up to hundreds of megabytes over time. Hero Meter zips logs older than a week into one archive per month (about 90% smaller, nothing is lost) and deletes archives older than six months. Both ages can be changed in **Options → Log Files**, deleting can be set to **Never**, and today's log is never touched. A fresh zip is never deleted in its first two weeks.
 
 ![Log clean-up settings](docs/screenshots/log-cleanup.png)
 

@@ -6,10 +6,23 @@
 2. Put it anywhere and double-click it. There's no installer.
 3. In the game, turn on **Log Chat** for each character you test with:
    `Menu → Options → Windows → Chat → Log Chat` (or type `/logchat` once).
+4. **Using pets or powers like Rain of Fire or Caltrops?** Add the Pet channels to a chat tab: right-click
+   a chat tab → **Edit Tab** → add Pet Combat, Pet Damage Inflicted, Pet Damage Received, Pet Hit Rolls,
+   Pet Healing Delivered and Pet Healing Received. Otherwise the game never logs that damage.
 
 If Windows says **"Windows protected your PC"**, click **More info → Run anyway**. New programs without a paid
 signing certificate always get that warning. This file was built by GitHub from the code in this repo, and its
 SHA-256 checksum is in `SHA256.txt` below.
+
+### New in beta.5
+
+- **User guide**: every setting with its default, the bigger features and a troubleshooting FAQ. Open it
+  with **⚙ → User Guide**, or click **User Guide ↗** at the top right of Options to jump to the
+  section for the page you're on.
+- **Options reorganized** into four groups (Meter, Look, Windows, Data), with a **search box** that finds any
+  setting by name. **Show example bars** now sits at the top of Options, so it works from any page.
+- **Pet logging check**: if you use pet or pseudo-pet powers and the log shows no pet lines, Hero Meter tells
+  you the Pet chat channels aren't being logged and how to add them. It never changes your game settings.
 
 ### New in beta.4
 

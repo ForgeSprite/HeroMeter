@@ -2,6 +2,31 @@
 
 All notable changes to Hero Meter are listed here, newest first.
 
+## v2.0.0-beta.5
+
+### New
+- **Pet logging check**: if you use pet or pseudo-pet powers (summons, Rain of Fire, Caltrops, Burn...) in a fight
+  and the log shows no pet lines at all, Hero Meter tells you the Pet chat channels aren't being logged and
+  how to add them (Options → Log Files). It never changes your game settings. Once a day per character at most,
+  and it can be turned off in Options → Alerts.
+- **User guide** ([docs/USER_GUIDE.md](docs/USER_GUIDE.md)): every Options page with its defaults, the bigger
+  features and a troubleshooting FAQ. Open it with **⚙ → User Guide**, or click **User Guide**
+  at the top right of Options to jump to the section for the page you're on.
+
+### Changed
+- **Options reorganized** into four named groups (Meter, Look, Windows, Data), with every setting in exactly
+  one place. The menu scrolls, and a **search box** finds a setting by name and highlights it on the page.
+- **Show example bars** now sits in the bar at the top of Options, so it works from any page.
+- The theme editors open from their theme pages (with a Back button) instead of having their own menu entries.
+- Opacity, fading and click-through share one page; fights, Overall data and pets have their own pages; the
+  DPS graph switch moved to Death Recap & Breakdown; the build page is now **Builds** (Mids and Sidekick).
+
+### Fixed
+- The Window Theme Editor's "Start from" box could show an internal name.
+- Two notes in Options pointed to old places (bar shape in the Bar Theme Editor, and a repeated pet note on
+  the Log Files page).
+- The build page no longer shows the full path to Mids (it included your Windows user name).
+
 ## v2.0.0-beta.4
 
 ### New

@@ -20,12 +20,27 @@ import cohskin
 import cohframe
 import logmgr
 import records
+try:
+    from options_index import OPTIONS_INDEX
+except Exception:
+    OPTIONS_INDEX = {}
 import mids
 import pettypes
 
 APP_NAME = "Hero Meter"
-VERSION = "2.0.0-beta.4"
+VERSION = "2.0.0-beta.5"
 REPO = "ForgeSprite/HeroMeter"            # GitHub owner/name: update check + About links
+GUIDE_URL = "https://github.com/" + REPO + "/blob/main/docs/USER_GUIDE.md"
+# Options page -> section of the user guide (GitHub heading anchors)
+GUIDE_ANCHORS = {"page_general": "general", "page_fights": "fights-and-segments", "page_pets": "pets",
+                 "page_alerts": "alerts", "page_records": "records", "page_skins": "skin-and-layout",
+                 "page_wthemes": "window-themes", "page_themes": "bar-themes", "page_bars": "bars",
+                 "page_texts": "bar-text", "page_title": "title-bar", "page_status": "statusbar",
+                 "page_tips": "tooltips", "page_windows": "windows-and-tabs",
+                 "page_opacity": "opacity-and-fading", "page_profiles": "profiles", "page_log": "log-files",
+                 "page_combat": "death-recap-and-breakdown", "page_mids": "builds",
+                 "page_rename": "rename-powers", "page_weditor": "window-theme-editor",
+                 "page_editor": "bar-theme-editor"}
 FROZEN = getattr(sys, "frozen", False)
 
 
@@ -87,7 +102,7 @@ DEFAULTS = {
     "no_focus": True,
     "ui_scale": 1.0,
     "auto_dpi": True,
-    "opt_page": "page_display",
+    "opt_page": "page_general",
     "theme": "minimal",
     "custom_themes": {},
     "views": [],
@@ -161,6 +176,8 @@ DEFAULTS = {
     "alert_immob": False,                # also alert on immobilize (very common, so off by default)
     "alert_pet_mez": False,              # pop-up when a pet is mezzed (noisy for Masterminds)
     "alert_sound": False,                # play a short sound with each alert
+    "alert_pet_log": True,               # warn when pet / pseudo-pet damage isn't being logged
+    "pet_log_warned": {},                # character -> date we last warned about it
     "bd_graph": True,                    # DPS-over-time graph in the Breakdown window
     "tip_font_size": 13,
     "tip_lines": 10,
@@ -215,6 +232,7 @@ DEFAULTS = {
 GLOBAL_KEYS = {"bd_geometry", "recap_geometry", "opt_geometry", "log_path", "logs_dir", "log_auto",
                "log_cleanup", "log_keep_days", "log_delete_days", "log_cleanup_last",
                "records", "records_mode", "records_popup", "records_by_build", "records_min_fight",
+               "pet_log_warned",
                "load_history", "opt_page", "custom_themes", "renames", "pet_types", "profiles",
                "active_profile", "char_profiles", "auto_profile", "custom_skins",
                "build_geometry", "char_builds", "auto_build", "build_source",
@@ -1168,7 +1186,9 @@ class Toast:
         self._job = None
         self._last = ("", 0.0)
 
-    def show(self, title, detail="", accent=(255, 96, 96), flat_text=None, flat_bg="#7a1420", secs=2.8):
+    def show(self, title, detail="", accent=(255, 96, 96), flat_text=None, flat_bg="#7a1420", secs=2.8,
+             on_click=None):
+        self._on_click = on_click
         text = flat_text or (title + (" " + detail if detail else ""))
         now = time.time()
         if self._last[0] == text and now - self._last[1] < 1.5:
@@ -1214,7 +1234,7 @@ class Toast:
             st = u.GetWindowLongW(ctypes.c_void_p(hwnd), -20)
             u.SetWindowLongW(ctypes.c_void_p(hwnd), -20, st | 0x80000 | 0x80)
             self._chwnd = hwnd
-            t.bind("<Button-1>", lambda e: self.hide())
+            t.bind("<Button-1>", lambda e: self._clicked())
         self.ct.geometry("%dx%d+%d+%d" % (w, h, x, y))
         self.ct.deiconify()
         self.ct.lift()
@@ -1229,7 +1249,7 @@ class Toast:
             self.lab = tk.Label(t, font=FONTS["head"], fg="#ffffff", padx=px(14), pady=px(5), bd=0)
             self.lab.pack(padx=max(1, px(2)), pady=max(1, px(2)))
             for w in (t, self.lab):
-                w.bind("<Button-1>", lambda e: self.hide())
+                w.bind("<Button-1>", lambda e: self._clicked())
         self.t.configure(bg="#e8e0d0")
         self.lab.configure(text=text, bg=flat_bg)
         self.t.update_idletasks()
@@ -1240,6 +1260,15 @@ class Toast:
             pass
         self.t.deiconify()
         self.t.lift()
+
+    def _clicked(self):
+        cb = getattr(self, "_on_click", None)
+        self.hide()
+        if cb:
+            try:
+                cb()
+            except Exception:
+                pass
 
     def hide(self):
         self._job = None
@@ -3510,6 +3539,7 @@ class MainWindow(DarkWin):
                  {"sep": True},
                  {"label": "Always on top", "check": app.cfg["topmost"], "cmd": lambda: app.toggle("topmost")},
                  {"sep": True},
+                 {"label": "User Guide", "cmd": lambda: app.open_url(GUIDE_URL)},
                  {"label": "About Hero Meter\u2026", "cmd": lambda: app.root.after(10, lambda: app.about_menu(x, y))},
                  {"label": "Exit", "cmd": app.quit}]
         DMenu(app, x, y, items, min_width=220)
@@ -4938,25 +4968,28 @@ class OptionsWin(DarkWin):
         if self.app.cfg.get("demo_mode"):          # example bars only while Options is open
             self.app.toggle_demo(False)
 
-    PAGES = [("Display", "page_display"), ("Log File", "page_log"), ("Combat Log", "page_combat"),
-             (None, None),
-             ("Profiles", "page_profiles"), ("Skins", "page_skins"), ("Window Themes", "page_wthemes"),
-             ("Window Theme Editor", "page_weditor"), ("Bar Themes", "page_themes"),
-             ("Bar Theme Editor", "page_editor"), ("Mids' Build", "page_mids"),
-             (None, None),
-             ("Bars: General", "page_bars"), ("Bars: Texts", "page_texts"),
-             (None, None),
-             ("Title Bar", "page_title"), ("Window Body", "page_body"), ("Statusbar", "page_status"),
-             ("Windows & Tabs", "page_windows"), ("Automation", "page_auto"), ("Tooltips", "page_tips"), ("Alerts", "page_alerts"), ("Records", "page_records"),
-             (None, None),
+    PAGES = [("@Meter", None),
+             ("General", "page_general"), ("Fights & Segments", "page_fights"), ("Pets", "page_pets"),
+             ("Alerts", "page_alerts"), ("Records", "page_records"),
+             ("@Look", None),
+             ("Skin & Layout", "page_skins"), ("Window Themes", "page_wthemes"), ("Bar Themes", "page_themes"),
+             ("Bars", "page_bars"), ("Bar Text", "page_texts"), ("Title Bar", "page_title"),
+             ("Statusbar", "page_status"), ("Tooltips", "page_tips"),
+             ("@Windows", None),
+             ("Windows & Tabs", "page_windows"), ("Opacity & Fading", "page_opacity"), ("Profiles", "page_profiles"),
+             ("@Data", None),
+             ("Log Files", "page_log"), ("Death Recap & Breakdown", "page_combat"), ("Builds", "page_mids"),
              ("Rename Powers", "page_rename")]
+    PARENT = {"page_weditor": "page_wthemes", "page_editor": "page_themes"}     # editors open from these
+    LEGACY = {"page_display": "page_general", "page_body": "page_opacity", "page_auto": "page_opacity"}
 
     def __init__(self, app):
         super().__init__(app, APP_NAME + " Options", "opt_geometry",
                          "%dx%d+%d+%d" % (px(900), px(620), px(300), px(100)), min_size=(640, 420))
         self.right_buttons = [(G_CLOSE, lambda x, y: self.close(), "Close")]
         self.vars = {}
-        self.page = app.cfg.get("opt_page") or "page_display"
+        self.page = app.cfg.get("opt_page") or "page_general"
+        self.page = self.LEGACY.get(self.page, self.page)
         self.log_label = None
         self.pagef = None
         self.build()
@@ -5018,20 +5051,97 @@ class OptionsWin(DarkWin):
             side="left", padx=(px(10), px(4)), pady=px(3))
         self._slider_widget(top, "ui_scale", 50, 200, 5, 100.0, length=px(170), bg=C["title"],
                             live=False).pack(side="left", pady=px(4))
-        nav = tk.Frame(self.body, bg=C["menu_bg"], width=px(170))
-        nav.pack(side="left", fill="y")
-        nav.pack_propagate(False)
+        dv = tk.BooleanVar(value=bool(self.app.cfg.get("demo_mode")))
+        tk.Checkbutton(top, text="Show example bars in the meter", variable=dv, bg=C["title"], fg=C["text"],
+                       selectcolor=C["menu_bg"], activebackground=C["title"], activeforeground=C["text"],
+                       font=FONTS["ui"], bd=0, highlightthickness=0,
+                       command=lambda: self.app.toggle_demo(bool(dv.get()))).pack(side="left", padx=(px(18), 0))
+        hl = self._help_lbl = tk.Label(top, text=self._help_text(), bg=C["title"], fg=C["gold"],
+                                       font=FONTS["ui"], cursor="hand2")
+        hl.pack(side="right", padx=(0, px(12)))
+        hl.bind("<Button-1>", lambda e: self.open_help())
+        hl.bind("<Enter>", lambda e: hl.configure(fg=C["text"]))
+        hl.bind("<Leave>", lambda e: hl.configure(fg=C["gold"]))
+        navw = tk.Frame(self.body, bg=C["menu_bg"], width=px(178))
+        navw.pack(side="left", fill="y")
+        navw.pack_propagate(False)
+        sv = tk.StringVar(value=getattr(self, "_search", ""))
+        srow = tk.Frame(navw, bg=C["menu_bg"])
+        srow.pack(fill="x", padx=px(6), pady=(px(6), px(4)))
+        se = tk.Entry(srow, textvariable=sv, bg=C["bg"], fg=C["text"], insertbackground=C["text"], relief="flat",
+                      font=FONTS["ui"])
+        se.pack(fill="x", ipady=px(3))
+        hint = tk.Label(se, text="Search settings\u2026", bg=C["bg"], fg=C["faint"], font=FONTS["ui"])
+        navc = tk.Canvas(navw, bg=C["menu_bg"], highlightthickness=0, bd=0)
+        navc.pack(fill="both", expand=True)
+        nav = tk.Frame(navc, bg=C["menu_bg"])
+        nwin = navc.create_window(0, 0, window=nav, anchor="nw")
+        nav.bind("<Configure>", lambda e: navc.configure(scrollregion=navc.bbox("all")))
+        navc.bind("<Configure>", lambda e: navc.itemconfigure(nwin, width=e.width))
+
+        def nav_wheel(e):
+            if nav.winfo_reqheight() > navc.winfo_height():
+                navc.yview_scroll(-1 if e.delta > 0 else 1, "units")
+            return "break"
         self.nav_btns = {}
-        tk.Frame(nav, bg=C["menu_bg"], height=px(6)).pack(fill="x")
+        self._nav_items = []
         for label, page in self.PAGES:
             if label is None:
-                tk.Frame(nav, bg=C["menu_bg"], height=px(10)).pack(fill="x")
                 continue
-            b = tk.Label(nav, text=label, anchor="w", font=FONTS["ui"], padx=px(10), pady=px(4), cursor="hand2",
+            if label.startswith("@"):
+                w = tk.Label(nav, text=label[1:].upper(), anchor="w", font=FONTS["small"], fg=C["gold"],
+                             bg=C["menu_bg"], padx=px(10))
+                self._nav_items.append(("head", w, None))
+                continue
+            b = tk.Label(nav, text=label, anchor="w", font=FONTS["ui"], padx=px(10), pady=px(3), cursor="hand2",
                          bg=C["block_head"], fg=C["text"])
-            b.pack(fill="x", padx=px(6), pady=px(1))
             b.bind("<Button-1>", lambda e, p=page: self.show_page(p))
             self.nav_btns[page] = b
+            self._nav_items.append(("page", b, page))
+        for _k, w, _p in self._nav_items:
+            w.bind("<MouseWheel>", nav_wheel)
+        navc.bind("<MouseWheel>", nav_wheel)
+
+        def filt(*_):
+            q = sv.get().strip().lower()
+            self._search = sv.get()
+            if q:
+                hint.place_forget()
+            else:
+                hint.place(x=px(4), rely=0.5, anchor="w")
+            for _k, w, _p in self._nav_items:
+                w.pack_forget()
+            pending = None
+            first = None
+            best = (-1, None)
+            for kind, w, pg in self._nav_items:
+                if kind == "head":
+                    pending = w
+                    continue
+                lab = w.cget("text").lower()
+                if q and q not in lab and q not in OPTIONS_INDEX.get(pg, ""):
+                    continue
+                if pending is not None:
+                    pending.pack(fill="x", pady=(px(8) if first else px(2), px(1)))
+                    pending = None
+                w.pack(fill="x", padx=px(6), pady=px(1))
+                first = first or pg
+                if q:       # open the page that mentions it most (a page named after it wins)
+                    ix = OPTIONS_INDEX.get(pg, "")
+                    labels, _sep, notes = ix.partition(" || ")
+                    score = (100 if q in lab else 0) + 3 * labels.count(q) + notes.count(q)
+                    if score > best[0]:
+                        best = (score, pg)
+            self._first_hit = best[1] or first
+            navc.yview_moveto(0)
+
+        def go(_e=None):
+            if getattr(self, "_first_hit", None):
+                self.show_page(self._first_hit)
+        sv.trace_add("write", filt)
+        se.bind("<Return>", go)
+        hint.bind("<Button-1>", lambda e: se.focus_set())
+        filt()
         right = tk.Frame(self.body, bg=C["bg"])
         right.pack(side="left", fill="both", expand=True)
         self.sc = tk.Canvas(right, bg=C["bg"], highlightthickness=0, bd=0)
@@ -5039,9 +5149,17 @@ class OptionsWin(DarkWin):
         self.sb.pack(side="right", fill="y", padx=(0, px(2)), pady=(px(2), px(16)))
         self.sc.pack(side="left", fill="both", expand=True)
         self.sc.configure(yscrollcommand=self.sb.set, yscrollincrement=px(24))
-        self.show_page(self.page if hasattr(self, self.page) else "page_display")
+        self.show_page(self.page if hasattr(self, self.page) else "page_general")
         tk.Misc.lift(self.grip)
         self._uncover()
+
+    def _help_text(self, page=None):
+        return "User Guide \u2197"      # opens the guide at this page's section
+
+    def open_help(self):
+        """Open the user guide at the section for the page you're on."""
+        anchor = GUIDE_ANCHORS.get(getattr(self, "page", None) or "")
+        self.app.open_url(GUIDE_URL + ("#" + anchor if anchor else ""))
 
     def show_page(self, page):
         # redrawing the same page (e.g. after clicking a preset) keeps your place instead of jumping to the top
@@ -5060,8 +5178,12 @@ class OptionsWin(DarkWin):
         self._keep_scroll = None
         self.page = page
         self.app.cfg["opt_page"] = page
+        try:
+            self._help_lbl.configure(text=self._help_text(page))
+        except Exception:
+            pass
         for p, b in self.nav_btns.items():
-            on = p == page
+            on = p == page or self.PARENT.get(page) == p
             b.configure(bg=C["sel"] if on else C["block_head"], fg=C["gold"] if on else C["text"])
         self.sc.delete("all")
         if self.pagef is not None:
@@ -5094,6 +5216,17 @@ class OptionsWin(DarkWin):
                 bind_tree(c)
         bind_tree(f)
         self.sc.bind("<MouseWheel>", wheel)
+        q = (getattr(self, "_search", "") or "").strip().lower()
+        if q:
+            def mark(w):
+                for c in w.winfo_children():
+                    try:
+                        if q in str(c.cget("text")).lower():
+                            c.configure(fg=C["gold"])
+                    except Exception:
+                        pass
+                    mark(c)
+            mark(f)
         if own:
             self._uncover()
 
@@ -5151,15 +5284,16 @@ class OptionsWin(DarkWin):
     def slider(self, col, key, text, lo, hi, res=1, mult=1.0, live=True):
         row = tk.Frame(self.cols[col], bg=C["bg"])
         row.pack(fill="x", pady=px(1))
-        tk.Label(row, text=text, bg=C["bg"], fg=C["text"], font=FONTS["ui"], width=20, anchor="w").pack(side="left")
+        tk.Label(row, text=text, bg=C["bg"], fg=C["text"], font=FONTS["ui"], width=24, anchor="w").pack(side="left")
         self._slider_widget(row, key, lo, hi, res, mult, live=live).pack(side="left", pady=px(2))
 
     def dropdown(self, col, key, text, choices, getter=None, setter=None):
         row = tk.Frame(self.cols[col], bg=C["bg"])
         row.pack(fill="x", pady=px(3))
-        tk.Label(row, text=text, bg=C["bg"], fg=C["text"], font=FONTS["ui"], width=20, anchor="w").pack(side="left")
+        tk.Label(row, text=text, bg=C["bg"], fg=C["text"], font=FONTS["ui"], width=24, anchor="w").pack(side="left")
         get = getter or (lambda: self.app.cfg.get(key))
-        cur = dict(choices).get(get(), str(get()))
+        v0 = get()
+        cur = dict(choices).get(v0) or ("(your changes)" if str(v0).startswith("__") else str(v0))
         btn = tk.Label(row, text=cur + "   ▾", bg=C["block_head"], fg=C["text"], font=FONTS["uib"],
                        padx=px(8), pady=px(2), cursor="hand2", anchor="w", width=20)
         btn.pack(side="left")
@@ -5201,8 +5335,7 @@ class OptionsWin(DarkWin):
         return b
 
     # ------------------------------------------------------------------ pages
-    def page_display(self):
-        a = self.app
+    def page_general(self):
         self.section(0, "General")
         self.dropdown(0, "num_format", "Number format",
                       [("short", "12.3K  (short)"), ("full", "12,345  (full)"), ("plain", "12345  (plain)")])
@@ -5211,24 +5344,29 @@ class OptionsWin(DarkWin):
         self.dropdown(0, "time_measure", "Time measure",
                       [("effective", "Effective (whole fight)"), ("active", "Active (only while attacking)")])
         self.check(0, "realtime_dps", "Show real-time DPS (last 5 sec) while fighting")
-        self.section(0, "Segments")
-        self.slider(0, "max_segments", "Segments to keep", 5, 100)
+
+    page_display = page_general
+
+    def page_fights(self):
+        self.section(0, "Fights")
         self.slider(0, "combat_timeout", "End fight after idle (sec)", 3, 60)
+        self.check(0, "auto_current", "Switch to the current fight when a new one starts")
         self.check(0, "erase_trash", "Auto-erase short trash fights")
         self.slider(0, "trash_seconds", "...shorter than (sec)", 1, 30)
-
+        self.slider(0, "max_segments", "Fights to keep", 5, 100)
         self.section(1, "Overall Data")
         self.dropdown(1, "overall_clear", "Clear overall data",
                       [("manual", "Only when I reset"), ("zone", "On zone change"),
                        ("login", "On login / character switch")])
-        self.section(1, "Pets")
-        self.check(1, "show_pet_type", "Show pet type on bars")
-        self.check(1, "tier_order", "Order pets by tier (Tier 3 first)")
-        self.dropdown(1, None, "Grouping", [(tuple(sorted(k)), lab) for lab, k in GROUPINGS],
+
+    def page_pets(self):
+        a = self.app
+        self.section(0, "Pets")
+        self.check(0, "show_pet_type", "Show pet type on bars")
+        self.check(0, "tier_order", "Order pets by tier (Tier 3 first)")
+        self.dropdown(0, None, "Grouping", [(tuple(sorted(k)), lab) for lab, k in GROUPINGS],
                       getter=lambda: tuple(sorted(a.collapsed)), setter=lambda k: a.set_grouping(list(k)))
-        self.section(1, "Your Self")
-        self.check(1, "self_color_on", "Use a different bar color for you")
-        self.color(1, "self_color", "Your bar color")
+        self.note(0, "Right-click a bar in the meter to switch grouping quickly.")
 
     def page_log(self):
         a = self.app
@@ -5243,6 +5381,14 @@ class OptionsWin(DarkWin):
             side="left", padx=px(6))
         self.button(row, "Logs Folder…", lambda: (a.browse_logs_dir(), self.update_log_label())).pack(side="left")
         self.check(0, "load_history", "Load earlier fights from today's log on start")
+        self.section(0, "Logging Pets")
+        self.note(0, "Pets, and powers like Rain of Fire, Caltrops or Burn that do their damage through an "
+                     "invisible pet, only reach the chat log if the Pet channels are in one of your chat tabs:")
+        self.note(0, "1. Right-click a tab on your chat window (e.g. Combat) and choose Edit Tab.\n"
+                     "2. Add these channels: Pet Combat, Pet Damage Inflicted, Pet Damage Received, "
+                     "Pet Hit Rolls, Pet Healing Delivered, Pet Healing Received.\n"
+                     "3. Do it once on each character that uses pets.")
+        self.note(0, "Hero Meter warns you if it sees pet powers being used but no pet lines in the log.")
         self.section(1, "Log Clean-up")
         self.note(1, "The game keeps a chat log for every day you play and never removes them. Hero Meter can "
                      "zip older logs (about 90% smaller, nothing is lost) and delete the zips once they're "
@@ -5265,8 +5411,7 @@ class OptionsWin(DarkWin):
         if dirs:
             self.button(row2, "Open logs folder", lambda: os.startfile(dirs[0])).pack(side="left", padx=px(6))
         self.update_log_stats(getattr(a, "_log_cleanup_result", None))
-        self.note(0, "The game must have 'Log Chat' turned on (Options → Windows → Chat), and pet combat "
-                     "channels added to a chat tab, for pet damage to show up.")
+        self.note(0, "The game must have 'Log Chat' turned on (Options → Windows → Chat).")
         self.update_log_label()
 
     def update_log_stats(self, res=None):
@@ -5299,6 +5444,9 @@ class OptionsWin(DarkWin):
         self.check(1, "dot_separate", "Show damage-over-time as its own line")
         self.check(1, "merge_crits", "Merge critical hits into normal hits")
         self.note(1, "Changing the damage-over-time option re-reads today's log.")
+        self.section(1, "Breakdown")
+        self.check(1, "bd_graph", "Show the DPS-over-time graph",
+                   after=lambda: self.app.breakdown.refresh() if getattr(self.app, "breakdown", None) else None)
 
     def page_bars(self):
         self.section(0, "Bars")
@@ -5315,13 +5463,12 @@ class OptionsWin(DarkWin):
                       [("pet", "Each pet its own color"), ("tier", "By henchman tier"), ("single", "One color")])
         self.color(1, "bar_single_color", "Single bar color")
         self.color(1, "bar_bg_color", "Bar background")
-        self.color(1, "self_color", "Your bar color (Display → Your Self)")
+        self.check(1, "self_color_on", "Use a different bar color for you")
+        self.color(1, "self_color", "Your bar color")
 
     def page_themes(self):
         a = self.app
         self.section(0, "Bar Themes")
-        self.check(0, "demo_mode", "Show example bars in the meter (to try looks without a fight)",
-                   after=lambda: self.app.toggle_demo(self.app.cfg.get("demo_mode")))
         self.note(0, "Bar themes only color the bars (you, pet tiers, pets, enemies). The windows come from "
                      "your skin, and the bar shape is picked separately.")
         eb = tk.Frame(self.cols[0], bg=C["bg"])
@@ -5338,11 +5485,7 @@ class OptionsWin(DarkWin):
             card.grid(row=i // 2, column=i % 2, padx=px(5), pady=px(5))
             self._draw_theme_card(card, t, cw, ch, on)
             card.bind("<Button-1>", lambda e, k=key: a.root.after(10, lambda: a.set_theme(k)))
-        self.section(1, "Bar Shape")
-        self.dropdown(1, "bar_texture", "Bar shape", BAR_STYLES)
-        self.check(1, "row_border", "Thin border around bars")
-        self.slider(1, "row_spacing", "Spacing", 0, 8)
-        self.note(1, "Shape and colors are separate: any bar theme works with any shape.")
+        self.note(0, "Bar shape, height, spacing and borders are on the Bars page.")
 
     # ---------------------------------------------------------------- theme editor
     THEME_FIELDS = [
@@ -5396,6 +5539,9 @@ class OptionsWin(DarkWin):
             self._edit_load_quiet(a.cfg.get("bar_theme", "minimal"))
         e = self.edit
         c0 = self.cols[0]
+        bk = tk.Frame(self.cols[0], bg=C["bg"])
+        bk.pack(fill="x", pady=(px(8), 0))
+        self.button(bk, "\u2190 Back to Bar Themes", lambda: self.show_page("page_themes")).pack(side="left")
         self.section(0, "Bar Theme Editor")
         self.note(0, "Start from any theme, change any color, then Apply to try it or Save it as your own.")
         self.dropdown(0, None, "Start from",
@@ -5443,7 +5589,7 @@ class OptionsWin(DarkWin):
         self.section(1, "How it fits together")
         self.note(1, "Bar themes only color the bars, so they work with every skin and window theme. "
                      "The preview uses your current skin and bar shape.")
-        self.note(1, "Bar shape: \u2699 \u2192 Bar Themes \u2192 Bar Shape.  Window colors: Window Themes.")
+        self.note(1, "Bar shape, size and borders: the Bars page.  Window colors: Window Themes.")
 
     def _edit_load_quiet(self, key):
         self.edit = theme_copy(THEMES.get(key) or THEMES["minimal"])
@@ -5541,7 +5687,7 @@ class OptionsWin(DarkWin):
         self.section(0, "Text")
         row = tk.Frame(self.cols[0], bg=C["bg"])
         row.pack(fill="x", pady=px(3))
-        tk.Label(row, text="Font", bg=C["bg"], fg=C["text"], font=FONTS["ui"], width=20, anchor="w").pack(side="left")
+        tk.Label(row, text="Font", bg=C["bg"], fg=C["text"], font=FONTS["ui"], width=24, anchor="w").pack(side="left")
         cur = self.app.cfg.get("row_font", "Oswald")
         fb = tk.Label(row, text=cur + "   \u25be", bg=C["block_head"], fg=C["text"], font=(cur, -px(15)),
                       padx=px(8), pady=px(2), cursor="hand2", anchor="w", width=18)
@@ -5572,19 +5718,30 @@ class OptionsWin(DarkWin):
         self.check(1, "btn_min", "Minimize")
         self.note(1, "Settings and Close are always shown.")
 
-    def page_body(self):
+    def page_opacity(self):
         self.section(0, "Window")
         self.slider(0, "alpha", "Opacity (%)", 20, 100, 1, 100.0)
-        self.color(0, "body_bg", "Background color")
-        self.check(0, "border_on", "Window border")
-        self.color(0, "border_color", "Border color")
         self.check(0, "topmost", "Always on top (also above City of Heroes)")
         self.check(0, "no_focus", "Clicking the meter doesn't take focus from the game")
         self.check(0, "auto_dpi", "Match each monitor's Windows scaling automatically")
+        self.section(0, "Fade")
+        self.check(0, "ooc_fade", "Fade out when not in combat")
+        self.slider(0, "ooc_alpha", "Out-of-combat opacity (%)", 0, 100, 1, 100.0)
+        self.slider(0, "combat_alpha", "In-combat opacity (%)", 10, 100, 1, 100.0)
+        self.check(0, "hover_fade", "Fade until mouse-over")
+        self.slider(0, "hover_alpha", "Faded opacity (%)", 0, 100, 1, 100.0)
+        self.note(0, "Hovering the meter always brings it back to full opacity.")
         self.section(1, "Click-Through")
         self.check(1, "click_through", "Click-through (clicks go to the game)")
         self.check(1, "click_through_combat", "Click-through only in combat")
         self.note(1, "Hold Ctrl to click the meter while click-through is on.")
+        self.section(1, "Details! Skin Window")
+        self.color(1, "body_bg", "Background color")
+        self.check(1, "border_on", "Window border")
+        self.color(1, "border_color", "Border color")
+        self.note(1, "Only used by the Details! skin. Colors for every skin come from Window Themes.")
+
+    page_body = page_opacity
 
     def page_status(self):
         self.section(0, "Statusbar")
@@ -5680,8 +5837,6 @@ class OptionsWin(DarkWin):
         a = self.app
         c = a.cfg
         self.section(0, "Skin")
-        self.check(0, "demo_mode", "Show example bars in the meter (to try looks without a fight)",
-                   after=lambda: self.app.toggle_demo(self.app.cfg.get("demo_mode")))
         self.note(0, "A skin is the shape and style of every Hero Meter window: frames, title bars, tabs, menus "
                      "and fonts. Colors come from Window Themes and Bar Themes, which work with every skin.")
         grid = tk.Frame(self.cols[0], bg=C["bg"])
@@ -5765,8 +5920,6 @@ class OptionsWin(DarkWin):
         a = self.app
         c = a.cfg
         self.section(0, "Window Themes")
-        self.check(0, "demo_mode", "Show example bars in the meter (to try looks without a fight)",
-                   after=lambda: self.app.toggle_demo(self.app.cfg.get("demo_mode")))
         self.note(0, "Window themes are the colors of the windows. Every theme works with every skin. Picking a theme uses its color, so matching the game's color switches off.")
         self.check(0, "match_game_color", "Match the game's window color",
                    after=lambda: (a.set_match_color(a.cfg.get("match_game_color")),
@@ -5823,6 +5976,9 @@ class OptionsWin(DarkWin):
             self.wedit_key = a.cfg.get("window_theme", "coh")
         e = self.wedit
         c0 = self.cols[0]
+        bk = tk.Frame(c0, bg=C["bg"])
+        bk.pack(fill="x", pady=(px(8), 0))
+        self.button(bk, "\u2190 Back to Window Themes", lambda: self.show_page("page_wthemes")).pack(side="left")
         self.section(0, "Window Theme Editor")
         self.note(0, "Start from any window theme, change its colors, then Apply to try it or Save it as your own.")
         self.dropdown(0, None, "Start from", [(k, t["label"]) for k, t in WINDOW_THEMES.items()
@@ -5954,17 +6110,19 @@ class OptionsWin(DarkWin):
     def page_mids(self):
         a = self.app
         c = a.cfg
-        self.section(0, "Mids' Reloaded")
+        self.section(0, "Builds")
+        self.note(0, "Compare a planned build from Mids Reborn (.mbd) or CoH Sidekick (.skif) with what you "
+                     "actually do in game.")
         exe = mids.mids_exe()
-        self.note(0, ("Found Mids Reborn: " + exe) if exe else "Mids Reborn wasn't found (you can still link .mbd files).")
         builds = mids.find_builds()
-        self.note(0, "%d saved build%s found in: %s" % (len(builds), "" if len(builds) == 1 else "s",
-                                                        "; ".join(mids.build_dirs()[:2])))
+        self.note(0, ("Mids Reborn found \u2714" if exe else "Mids Reborn not found (build files still work)") +
+                  "    %d build file%s found" % (len(builds), "" if len(builds) == 1 else "s"))
         row = tk.Frame(self.cols[0], bg=C["bg"])
         row.pack(fill="x", pady=px(4))
         self.button(row, "Open build window", a.open_build).pack(side="left")
         self.check(0, "auto_build", "Match builds to characters by file name automatically")
-        self.note(0, "Name a build file like \u201cMindguard - Tanker (...).mbd\u201d and it links itself.")
+        self.note(0, "Name a build file like \u201cMindguard - Tanker (...).mbd\u201d or "
+                     "\u201cMindguard - anything.skif\u201d and it links itself.")
         self.section(1, "Linked Builds")
         if c.get("char_builds"):
             for ch, path in sorted(c["char_builds"].items()):
@@ -6005,16 +6163,7 @@ class OptionsWin(DarkWin):
                      "Middle-click a tab to close it.\n"
                      "Closing the first (main) window closes them all.")
 
-    def page_auto(self):
-        self.section(0, "Combat")
-        self.check(0, "ooc_fade", "Fade out when not in combat")
-        self.slider(0, "ooc_alpha", "Out-of-combat opacity (%)", 0, 100, 1, 100.0)
-        self.slider(0, "combat_alpha", "In-combat opacity (%)", 10, 100, 1, 100.0)
-        self.check(0, "auto_current", "Switch to the current fight when a new one starts")
-        self.section(1, "Mouse")
-        self.check(1, "hover_fade", "Fade until mouse-over")
-        self.slider(1, "hover_alpha", "Faded opacity (%)", 0, 100, 1, 100.0)
-        self.note(1, "Hovering the meter always brings it back to full opacity.")
+    page_auto = page_opacity
 
     def page_tips(self):
         self.section(0, "Tooltips")
@@ -6032,15 +6181,13 @@ class OptionsWin(DarkWin):
         self.check(0, "alert_immob", "Also when you're immobilized (it happens a lot, so it's off at first)")
         self.check(0, "alert_pet_dead", "When one of your pets is defeated")
         self.check(0, "alert_pet_mez", "When one of your pets is held, stunned or slept")
+        self.check(0, "alert_pet_log", "When pet or pseudo-pet damage isn't reaching the chat log")
         self.check(0, "alert_sound", "Play a sound with each alert")
         row = tk.Frame(self.cols[0], bg=C["bg"])
         row.pack(fill="x", pady=px(6))
         self.button(row, "Show a test alert",
                     lambda: a.alert((time.time(), "mez", a.build_char(), "Test Enemy", "Holds", "Example Power"),
                                     force=True)).pack(side="left")
-        self.section(0, "Breakdown")
-        self.check(0, "bd_graph", "Show the DPS-over-time graph in the Breakdown window",
-                   after=lambda: a.breakdown.refresh() if getattr(a, "breakdown", None) else None)
 
     def page_records(self):
         a = self.app
@@ -6609,6 +6756,21 @@ class App:
             title, detail = "%s %s" % (pet, word.title()), "by %s" % src + (" (%s)" % power if power else "")
             text = "%s %s by %s" % (pet, word.lower(), src)
             accent, flat_bg = (255, 190, 80), "#7a5410"
+        elif kind == "no_pet_log":
+            char = self.parser.player
+            today = time.strftime("%Y-%m-%d")
+            warned = c.setdefault("pet_log_warned", {})
+            if not force and (not c.get("alert_pet_log", True) or warned.get(char) == today):
+                return
+            warned[char] = today
+            self.save_cfg()
+            if getattr(self, "toast", None) is None:
+                self.toast = Toast(self)
+            title = "Pet damage isn't being logged"
+            detail = "Add the Pet channels to a chat tab \u2014 click for how"
+            self.toast.show(title, detail, (120, 200, 255), title + ". " + detail, "#1f4f7a", secs=10,
+                            on_click=lambda: (self.open_options(), self.options.show_page("page_log")))
+            return
         elif kind == "pet_dead":
             if not c.get("alert_pet_dead", True):
                 return

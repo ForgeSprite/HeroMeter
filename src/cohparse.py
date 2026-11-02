@@ -70,6 +70,13 @@ PSEUDO_PETS = [
     (r"^Fire$", "Oil Slick Arrow", "Oil Slick Arrow"),
 ]
 PSEUDO_RES = [(re.compile(p), m, need) for p, m, need in PSEUDO_PETS]
+# Powers whose damage is done by a pet or pseudo pet, so it only reaches the chat log when the
+# Pet channels are in one of your chat tabs. Used to notice when they aren't.
+PET_POWERS = set(pettypes.SUMMONS) | {
+    "Rain of Fire", "Ice Storm", "Blizzard", "Freezing Rain", "Sleet", "Caltrops", "Burn", "Bonfire",
+    "Tar Patch", "Lightning Rod", "Chain Induction", "Rain of Arrows", "Oil Slick Arrow", "Poison Gas Arrow",
+    "Spectral Terror", "Tornado", "Lightning Storm", "Irradiated Ground", "Liquid Nitrogen", "Meteor",
+    "Jack Frost", "Fortunata", "Seeker Drones", "Detention Field", "Ignite", "Rain of Arrows"}
 _RE_OWN_DMG = re.compile(r"^(You hit .+? with your ).+?( for [\d,.]+ points? of )")
 _RE_OWN_HIT = re.compile(r"^((?:HIT|MISSED) .+?!+ Your ).+?( power )")
 _RE_OWN_HEAL = re.compile(r"^(You heal .+? with ).+?( for [\d,.]+ health)")
@@ -389,6 +396,10 @@ class Parser:
         self._pet_seen = {}             # pet name -> last time it fought
         self._enemy_seen = {}           # enemy name -> last time you or a pet hit it
         self._foe_seen = {}             # name -> last time it damaged you or a pet
+        self._pet_line_ts = None        # last time any pet line appeared in the log
+        self._own_hit_ts = None         # last time you hit something
+        self._petlog = [0, None]        # pet-power uses with no pet lines since, first such use
+        self._petlog_warned = False
         self.unplaced = {}              # pet names that aren't henchmen or known pseudo pets -> lines seen
         self.my_chars = set()           # every character name on the account (playerslot.txt)
         self.renames = {}               # power name -> merged / renamed name
@@ -506,6 +517,8 @@ class Parser:
                     self._pet_seen[actor_name] = ts
                     if actor_name not in self.typer.known and body.startswith("You hit "):
                         self.unplaced[actor_name] = self.unplaced.get(actor_name, 0) + 1
+                self._pet_line_ts = ts
+                self._petlog = [0, None]
         try:
             if kind == "player" and ("our " in body or body.endswith(" is recharged.")):
                 sm = R_SEEN.search(body)
@@ -517,6 +530,21 @@ class Parser:
             self._dispatch(ts, actor_name, kind, body)
         except Exception:
             pass  # never let one weird line break the meter
+
+    def _check_pet_logging(self, power, ts):
+        """A pet or pseudo-pet power used in a fight, three times, with no pet line at all since:
+        the Pet chat channels aren't being logged. Says so once per character."""
+        if self._petlog_warned or not (power in PET_POWERS or power.endswith("Judgement")):
+            return
+        if self._pet_line_ts is not None and ts - self._pet_line_ts < 300:
+            return                              # pet lines are arriving: all good
+        if self._own_hit_ts is None or ts - self._own_hit_ts > 30:
+            return                              # not fighting (casting into empty air proves nothing)
+        n, first = self._petlog
+        self._petlog = [n + 1, first or ts]
+        if n + 1 >= 3:
+            self._petlog_warned = True
+            self.alerts.append((ts, "no_pet_log", power))
 
     def pseudo_pet(self, name):
         """The power a pseudo pet's damage belongs to, or None for a real pet."""
@@ -566,6 +594,8 @@ class Parser:
                     e.received += amt
                     _get(e.received_by, (who, power)).add(amt, bool(dot), flair, dtype)
                 self._enemy_seen[target] = ts
+                if kind == "player":
+                    self._own_hit_ts = ts
                 self.version += 1
                 return
         if c0 == "H" and body.startswith("HIT "):
@@ -785,6 +815,7 @@ class Parser:
             if m:
                 power = self.pname(m.group(1))
                 self.my_powers.add(m.group(1))
+                self._check_pet_logging(m.group(1), ts)
                 self.typer.on_activate(m.group(1), ts)
                 for seg in self._targets(ts, combat=False):
                     a = seg.actor(who, kind)
@@ -817,6 +848,8 @@ class Parser:
     def _login_as(self, name, welcome=False):
         """A login line named the character (Welcome / free respec notice)."""
         self.last_login_welcome = welcome
+        if self.player != name:
+            self._petlog, self._petlog_warned, self._pet_line_ts = [0, None], False, None
         first = self.player != name or getattr(self, "_last_login_name", None) != name
         self.player = name
         self.login_count = getattr(self, "login_count", 0) + 1
