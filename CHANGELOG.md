@@ -2,6 +2,22 @@
 
 All notable changes to Hero Meter are listed here, newest first.
 
+## v2.0.0-beta.7
+
+### New
+- **Hover help in Options**: hover over any setting's name for a short note on what it does and its default.
+  Options search looks in these notes too, and lights up the setting it found.
+
+### Fixed
+- **Click-through** didn't work with the City of Heroes skin: the see-through frame behind the meter still
+  caught the clicks.
+- The meter could stop staying above the game after a long session, until both were restarted.
+- Options could lose its page list and top bar after the meter was moved to a screen with different
+  Windows scaling, if a hover note had just been shown.
+- A rebuilding Options page can no longer get stuck showing an old picture of itself.
+- If Hero Meter ever stops responding for 5 seconds, it notes where in **freeze-log.txt** (in the settings
+  folder), so the cause can be found.
+
 ## v2.0.0-beta.6
 
 ### New

@@ -14,6 +14,16 @@ If Windows says **"Windows protected your PC"**, click **More info → Run anywa
 signing certificate always get that warning. This file was built by GitHub from the code in this repo, and its
 SHA-256 checksum is in `SHA256.txt` below.
 
+### New in beta.7
+
+- **Hover help in Options**: rest the mouse on any setting's name for a short note on what it does and its
+  default. Options search reads these notes too.
+- **Click-through works with the City of Heroes skin.** Hold Ctrl to click the meter while it's on.
+- **Stays on top after long sessions**, even if the game was restarted.
+- Options no longer loses its page list and top bar when the meter moves to a screen with different scaling.
+- If Hero Meter ever stops responding, it writes a short `freeze-log.txt` next to its settings. Please
+  attach it to a bug report.
+
 ### New in beta.6
 
 - **An easier, illustrated user guide**: a screenshot of every Options page, short animations, and the

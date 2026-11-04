@@ -24,11 +24,15 @@ try:
     from options_index import OPTIONS_INDEX
 except Exception:
     OPTIONS_INDEX = {}
+try:
+    from options_help import HELP as OPTION_HELP
+except Exception:
+    OPTION_HELP = {}
 import mids
 import pettypes
 
 APP_NAME = "Hero Meter"
-VERSION = "2.0.0-beta.6"
+VERSION = "2.0.0-beta.7"
 REPO = "ForgeSprite/HeroMeter"            # GitHub owner/name: update check + About links
 GUIDE_URL = "https://github.com/" + REPO + "/blob/main/docs/USER_GUIDE.md"
 # Options page -> section of the user guide (GitHub heading anchors)
@@ -676,7 +680,8 @@ def exe_of_hwnd(hwnd):
         u, k = _u32(), ctypes.windll.kernel32
         pid = ctypes.c_ulong()
         u.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
-        name = _EXE_CACHE.get(pid.value)
+        hit = _EXE_CACHE.get(pid.value)
+        name = hit[0] if hit and time.time() - hit[1] < 30 else None    # ids get reused: re-check now and then
         if name is None:
             name = ""
             h = k.OpenProcess(0x1000, False, pid.value)       # PROCESS_QUERY_LIMITED_INFORMATION
@@ -688,7 +693,7 @@ def exe_of_hwnd(hwnd):
                 k.CloseHandle(h)
             if len(_EXE_CACHE) > 200:
                 _EXE_CACHE.clear()
-            _EXE_CACHE[pid.value] = name
+            _EXE_CACHE[pid.value] = (name, time.time())
         return name
     except Exception:
         return ""
@@ -4961,6 +4966,77 @@ class DSlider(tk.Canvas):
         return "break"
 
 
+class HoverHelp:
+    """A small note under a setting in Options: what it does, and its default."""
+
+    def __init__(self, owner):
+        self.owner = owner
+        self.top = None
+        self._job = None
+
+    def attach(self, widget, title, text, default=None):
+        def enter(e):
+            self.cancel()
+            self._job = (widget, widget.after(450, lambda: self.show(widget, title, text, default)))
+        widget.bind("<Enter>", enter, add="+")
+        widget.bind("<Leave>", lambda e: self.hide(), add="+")
+        widget.bind("<ButtonPress>", lambda e: self.hide(), add="+")
+
+    def cancel(self):
+        if self._job:
+            w, job = self._job
+            self._job = None
+            try:
+                w.after_cancel(job)          # through the same widget, so its command list stays right
+            except Exception:
+                pass
+
+    def show(self, widget, title, text, default):
+        self._job = None
+        try:
+            if not widget.winfo_exists() or not widget.winfo_viewable():
+                return
+        except Exception:
+            return
+        self.hide()
+        t = self.top = tk.Toplevel(self.owner.top)
+        t.overrideredirect(True)
+        t.attributes("-topmost", True)
+        bg = C["menu_bg"]
+        f = tk.Frame(t, bg=bg, highlightthickness=1, highlightbackground=C["gold"], bd=0)
+        f.pack()
+        wl = px(340)
+        tk.Label(f, text=" ".join(title.split()), bg=bg, fg=C["gold"], font=FONTS["uib"], anchor="w",
+                 justify="left", wraplength=wl).pack(fill="x", padx=px(10), pady=(px(7), 0))
+        tk.Label(f, text=text, bg=bg, fg=C["text"], font=FONTS["ui"], anchor="w", justify="left",
+                 wraplength=wl).pack(fill="x", padx=px(10), pady=(px(3), px(3) if default else px(8)))
+        if default:
+            tk.Label(f, text="Default: " + default, bg=bg, fg=C["dim"], font=FONTS["small"], anchor="w",
+                     justify="left").pack(fill="x", padx=px(10), pady=(px(2), px(8)))
+        t.update_idletasks()
+        w, h = t.winfo_reqwidth(), t.winfo_reqheight()
+        x = widget.winfo_rootx()
+        y = widget.winfo_rooty() + widget.winfo_height() + px(4)
+        try:
+            L, T, R, B = monitor_area(x, y, self.owner.app.root)
+        except Exception:
+            L, T, R, B = 0, 0, t.winfo_screenwidth(), t.winfo_screenheight()
+        if y + h > B:                   # no room below: show it above the setting
+            y = widget.winfo_rooty() - h - px(4)
+        x = max(L, min(x, R - w))
+        y = max(T, min(y, B - h))
+        t.geometry("+%d+%d" % (x, y))
+
+    def hide(self):
+        self.cancel()
+        if self.top is not None:
+            try:
+                self.top.destroy()
+            except Exception:
+                pass
+            self.top = None
+
+
 class OptionsWin(DarkWin):
     """Details!-style options panel: Scale on top, categories on the left, a page on the right."""
 
@@ -5017,6 +5093,7 @@ class OptionsWin(DarkWin):
             tk.Misc.lift(lab)
             lab.update_idletasks()
             self._covered = lab
+            t.after(1500, lambda: self._covered is lab and self._uncover())    # failsafe
         except Exception:
             self._covered = None
 
@@ -5044,7 +5121,14 @@ class OptionsWin(DarkWin):
         except Exception:
             self._keep_scroll = None
         for w in self.body.winfo_children():
-            w.destroy()
+            try:
+                w.destroy()
+            except tk.TclError:
+                for forget in (w.pack_forget, w.place_forget, w.grid_forget):
+                    try:
+                        forget()
+                    except Exception:
+                        pass
         self.pagef = None
         top = tk.Frame(self.body, bg=C["title"])
         top.pack(side="top", fill="x")
@@ -5063,6 +5147,8 @@ class OptionsWin(DarkWin):
         hl.bind("<Button-1>", lambda e: self.open_help())
         hl.bind("<Enter>", lambda e: hl.configure(fg=C["text"]))
         hl.bind("<Leave>", lambda e: hl.configure(fg=C["gold"]))
+        self._help_targets = []
+        self._help_by_label(top)
         navw = tk.Frame(self.body, bg=C["menu_bg"], width=px(178))
         navw.pack(side="left", fill="y")
         navw.pack_propagate(False)
@@ -5188,16 +5274,23 @@ class OptionsWin(DarkWin):
             b.configure(bg=C["sel"] if on else C["block_head"], fg=C["gold"] if on else C["text"])
         self.sc.delete("all")
         if self.pagef is not None:
-            self.pagef.destroy()
+            try:
+                self.pagef.destroy()
+            except tk.TclError:
+                self.pagef.pack_forget()
         f = self.pagef = tk.Frame(self.sc, bg=C["bg"])
         win = self.sc.create_window(0, 0, window=f, anchor="nw")
         f.bind("<Configure>", lambda e: self.sc.configure(scrollregion=self.sc.bbox("all")))
         self.sc.bind("<Configure>", lambda e: (self.sc.itemconfigure(win, width=e.width), self._relayout(e.width)))
         self.cols = [tk.Frame(f, bg=C["bg"]), tk.Frame(f, bg=C["bg"])]
         self.vars = {}
+        self._help_targets = []
+        if getattr(self, "_hover", None) is not None:
+            self._hover.hide()
         self.log_label = None
         self._wide = None
         getattr(self, page)()
+        self._help_by_label(f)
         f.update_idletasks()
         self._relayout()
         if keep:
@@ -5208,6 +5301,8 @@ class OptionsWin(DarkWin):
             self.sc.yview_moveto(0)
 
         def wheel(e):
+            if getattr(self, "_hover", None) is not None:
+                self._hover.hide()
             self.sc.yview_scroll(-1 if e.delta > 0 else 1, "units")
             return "break"
 
@@ -5228,6 +5323,12 @@ class OptionsWin(DarkWin):
                         pass
                     mark(c)
             mark(f)
+            for w, text in self._help_targets:       # found through its hover help
+                if q in text.lower():
+                    try:
+                        w.configure(fg=C["gold"])
+                    except Exception:
+                        pass
         if own:
             self._uncover()
 
@@ -5247,6 +5348,57 @@ class OptionsWin(DarkWin):
             c1.grid(row=1, column=0, sticky="nw", padx=(px(16), px(16)), pady=(0, px(16)))
 
     # ----------------------------------------------------------------- widgets
+    # --- hover help ------------------------------------------------------------
+    def _hoverer(self):
+        h = getattr(self, "_hover", None)
+        if h is None:
+            h = self._hover = HoverHelp(self)
+        return h
+
+    def _default_text(self, key, kind, choices=None, mult=1.0, label=""):
+        if not key:
+            return None
+        if key in SKIN_KEYS:
+            return "set by your skin"
+        if key not in DEFAULTS:
+            return None
+        d = DEFAULTS[key]
+        if kind == "check":
+            return "On" if d else "Off"
+        if kind == "dropdown":
+            lab = dict(choices or []).get(d)
+            return " ".join(lab.split()) if lab else None
+        if kind == "slider":
+            v = float(d) * mult
+            s = ("%d%%" % round(v)) if mult == 100.0 else ("%g" % v)
+            return s + (" sec" if "(sec)" in label else "")
+        return None
+
+    def _add_help(self, widget, key, title, default=None):
+        text = OPTION_HELP.get(key) if key else None
+        if not text:
+            return
+        widget._hm_help = True
+        self._help_targets.append((widget, text))
+        self._hoverer().attach(widget, title, text, default)
+
+    def _help_by_label(self, root):
+        """Buttons and labels whose help is looked up by their text ("@Text" in OPTION_HELP)."""
+        prefixes = [(k[1:-1], v) for k, v in OPTION_HELP.items() if k.startswith("@") and k.endswith("*")]
+        for c in root.winfo_children():
+            if not getattr(c, "_hm_help", False):
+                try:
+                    t = str(c.cget("text")).strip()
+                except Exception:
+                    t = ""
+                if t:
+                    text = OPTION_HELP.get("@" + t) or next((v for p, v in prefixes if t.startswith(p)), None)
+                    if text:
+                        c._hm_help = True
+                        self._help_targets.append((c, text))
+                        self._hoverer().attach(c, t.rstrip(":"), text)
+            self._help_by_label(c)
+
     def section(self, col, text):
         tk.Label(self.cols[col], text=text, bg=C["bg"], fg=C["gold"], font=FONTS["head_big"], anchor="w").pack(
             fill="x", pady=(px(14), px(4)))
@@ -5263,9 +5415,11 @@ class OptionsWin(DarkWin):
             self.app.set_cfg(key, bool(v.get()))
             if after:
                 after()
-        tk.Checkbutton(self.cols[col], text=text, variable=v, bg=C["bg"], fg=C["text"], selectcolor=C["menu_bg"],
-                       activebackground=C["bg"], activeforeground=C["text"], font=FONTS["ui"], anchor="w",
-                       bd=0, highlightthickness=0, command=cmd).pack(fill="x", pady=px(1))
+        cb = tk.Checkbutton(self.cols[col], text=text, variable=v, bg=C["bg"], fg=C["text"],
+                            selectcolor=C["menu_bg"], activebackground=C["bg"], activeforeground=C["text"],
+                            font=FONTS["ui"], anchor="w", bd=0, highlightthickness=0, command=cmd)
+        cb.pack(fill="x", pady=px(1))
+        self._add_help(cb, key, text, self._default_text(key, "check"))
 
     def _slider_widget(self, parent, key, lo, hi, res, mult, length=None, bg=None, live=True):
         integer = res >= 1 and mult == 1.0
@@ -5285,13 +5439,17 @@ class OptionsWin(DarkWin):
     def slider(self, col, key, text, lo, hi, res=1, mult=1.0, live=True):
         row = tk.Frame(self.cols[col], bg=C["bg"])
         row.pack(fill="x", pady=px(1))
-        tk.Label(row, text=text, bg=C["bg"], fg=C["text"], font=FONTS["ui"], width=24, anchor="w").pack(side="left")
+        lbl = tk.Label(row, text=text, bg=C["bg"], fg=C["text"], font=FONTS["ui"], width=24, anchor="w")
+        lbl.pack(side="left")
         self._slider_widget(row, key, lo, hi, res, mult, live=live).pack(side="left", pady=px(2))
+        self._add_help(lbl, key, text, self._default_text(key, "slider", mult=mult, label=text))
 
     def dropdown(self, col, key, text, choices, getter=None, setter=None):
         row = tk.Frame(self.cols[col], bg=C["bg"])
         row.pack(fill="x", pady=px(3))
-        tk.Label(row, text=text, bg=C["bg"], fg=C["text"], font=FONTS["ui"], width=24, anchor="w").pack(side="left")
+        lbl = tk.Label(row, text=text, bg=C["bg"], fg=C["text"], font=FONTS["ui"], width=24, anchor="w")
+        lbl.pack(side="left")
+        self._add_help(lbl, key, text, self._default_text(key, "dropdown", choices))
         get = getter or (lambda: self.app.cfg.get(key))
         v0 = get()
         cur = dict(choices).get(v0) or ("(your changes)" if str(v0).startswith("__") else str(v0))
@@ -5328,6 +5486,7 @@ class OptionsWin(DarkWin):
                 self.app.set_cfg(key, res[1])
         sw.bind("<Button-1>", choose)
         lab.bind("<Button-1>", choose)
+        self._add_help(lab, key, text)
 
     def button(self, parent, text, cmd):
         b = tk.Button(parent, text=text, command=cmd, bg=C["block_head"], fg=C["text"], activebackground=C["sel"],
@@ -7053,7 +7212,22 @@ class App:
         except Exception:
             pass
 
+    def _freeze_watch(self):
+        """If the window stops responding for 5 seconds, write where it was stuck to freeze-log.txt
+        in the settings folder (only then; nothing is written while things run normally)."""
+        try:
+            import faulthandler
+            fh = getattr(self, "_freeze_fh", None)
+            if fh is None:
+                path = os.path.join(os.path.dirname(CONFIG_PATH), "freeze-log.txt")
+                fh = self._freeze_fh = open(path, "a", encoding="utf-8")
+            faulthandler.dump_traceback_later(5, repeat=False, file=fh)
+        except Exception:
+            self._freeze_fh = False
+
     def auto_loop(self):
+        if getattr(self, "_freeze_fh", None) is not False:
+            self._freeze_watch()
         self._tip_watch()
         try:
             in_combat = self.parser.current is not None
@@ -7098,9 +7272,13 @@ class App:
                 if abs(a - getattr(m, "_alpha_now", -1.0)) > 0.005:
                     m._alpha_now = a
                     t.attributes("-alpha", a)
-                if want != getattr(m, "_ct", False):
-                    m._ct = want
-                    set_clickthrough(t, want)
+                bd = getattr(m, "backdrop", None)
+                ct_wins = [t] + ([bd.t] if bd is not None and getattr(bd, "t", None) is not None else [])
+                ct_key = (want,) + tuple(hwnd_of(x) for x in ct_wins)
+                if ct_key != getattr(m, "_ct", None):     # also re-applies when a window is re-created
+                    m._ct = ct_key
+                    for x in ct_wins:
+                        set_clickthrough(x, want)
             n = self.parser.seg_counter
             if n != getattr(self, "_seg_seen", n) and self.cfg["auto_current"]:
                 for m in self.meters:
@@ -7147,6 +7325,10 @@ class App:
         needless re-ordering = no flashing)."""
         try:
             tops = [w.top for w in self.windows()]
+            for w in self.windows():
+                bd = getattr(w, "backdrop", None)
+                if bd is not None and getattr(bd, "t", None) is not None and getattr(bd, "visible", False):
+                    tops.append(bd.t)
             if self.tip.top is not None:
                 tops.append(self.tip.top)
             if DMenu.current is not None:
@@ -7218,6 +7400,25 @@ class App:
             _TXT.clear()
             self.reapply_all()          # fonts, borders and frames at the new size
         self.redraw(force=True, breakdown=True)
+
+    def _diag_windows(self):
+        """Where each window and its frame are, and the monitor scaling under it (for odd layouts)."""
+        out = []
+        for w in self.windows():
+            try:
+                t = w.top
+                d = monitor_scale(t.winfo_rootx() + t.winfo_width() // 2, t.winfo_rooty() + t.winfo_height() // 2)
+                s = "%s %s @%s" % (type(w).__name__, t.winfo_geometry(), d)
+                bd = getattr(w, "backdrop", None)
+                if bd is not None and getattr(bd, "t", None) is not None:
+                    s += " frame %s" % bd.t.winfo_geometry()
+                if w is self.options:
+                    s += " parts " + ",".join(c.winfo_geometry() for c in w.body.winfo_children())
+                    s += " cover %s" % (getattr(w, "_covered", None) is not None)
+                out.append(s)
+            except Exception as e:
+                out.append("%s ?%s" % (type(w).__name__, e))
+        return "; ".join(out)
 
     def check_monitor(self):
         """Meter moved to a monitor with different Windows scaling: keep the same look/size."""
@@ -7627,6 +7828,7 @@ class App:
                  "Scale: S=%.2f  dpi=%.2f  ui=%.2f  auto_dpi=%s" % (S, getattr(self, "_dpi", 0), self.cfg["ui_scale"],
                                                                  self.cfg["auto_dpi"]),
                  "Settings: %s" % ("portable" if DATA_DIR == app_dir() else "AppData"),
+                 "Windows open: %s" % self._diag_windows(),
                  "Game folder: %s" % (self.cfg.get("game_dir") or "not found"),
                  "Game running: %s" % bool(find_game_window()[0]),
                  "Log: %s" % mask(self.log_path),

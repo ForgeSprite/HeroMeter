@@ -20,3 +20,5 @@ src/_*.py
 src/_*.png
 src/_*.jpg
 color_log.txt*
+freeze-log.txt
+error_log.txt

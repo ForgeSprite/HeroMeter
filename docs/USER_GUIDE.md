@@ -97,7 +97,9 @@ Click it to close it early. You choose which alerts you get on the [Alerts](#ale
 
 Open it with **⚙ → Options…**. Pages are grouped into Meter, Look, Windows and Data.
 
-Can't find a setting? Type in the search box.
+Not sure what a setting does? Hover over its name for a short note and its default.
+
+Can't find a setting? Type in the search box. It also searches those notes, so "dps" finds Time measure.
 
 ![Searching Options for "fade"](guide/options-search.gif)
 
