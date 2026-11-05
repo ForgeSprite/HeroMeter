@@ -32,7 +32,7 @@ import mids
 import pettypes
 
 APP_NAME = "Hero Meter"
-VERSION = "2.0.0-beta.7"
+VERSION = "2.0.0-beta.8"
 REPO = "ForgeSprite/HeroMeter"            # GitHub owner/name: update check + About links
 GUIDE_URL = "https://github.com/" + REPO + "/blob/main/docs/USER_GUIDE.md"
 # Options page -> section of the user guide (GitHub heading anchors)
@@ -7004,6 +7004,9 @@ class App:
         except Exception:
             self.main.flash_title("Couldn't see the game window", 3)
             return
+        if cohskin.screen_tinted(img):
+            self.main.flash_title("The game screen is tinted or black-and-white right now. Try again once that's off", 5)
+            return
 
         def done(col):
             if col is None:
@@ -7086,6 +7089,9 @@ class App:
             pass
         self._coh_tries = tries
         self._coh_force = force
+        self._coh_wait_until = time.time() + (120 if force else 0)
+        self._coh_hinted = False
+        self._coh_tint_waits = 0
         self._coh_prev = None
         try:                    # a color already known for this character shows straight away
             if self.cfg.get("match_game_color", True) and self.main and \
@@ -7113,6 +7119,11 @@ class App:
             self.color_log("waiting: game=%s logged_out=%s select=%s in_front=%s" % (
                 bool(hwnd), getattr(self, "logged_out", False), getattr(self, "_at_select", False),
                 bool(hwnd) and game_is_active()))
+            if hwnd and not busy_screen and time.time() < getattr(self, "_coh_wait_until", 0):
+                self._coh_tries += 1                # asked for: wait for the game to be in front
+                if not getattr(self, "_coh_hinted", False):
+                    self._coh_hinted = True
+                    self.main.flash_title("Click back into the game to read its color", 4)
             self.root.after(3000, self._coh_try)
             return
         r = _RECT()
@@ -7139,7 +7150,12 @@ class App:
         def work():
             col = None
             try:
-                col = cohskin.detect_window_color(cohskin.capture(rect, excl))
+                img = cohskin.capture(rect, excl)
+                if cohskin.screen_tinted(img):
+                    self._coh_tinted = True             # a sepia/tint effect is on: borders lie
+                else:
+                    self._coh_mild = cohskin.mildly_tinted(img)
+                    col = cohskin.detect_window_color(img)
             except Exception:
                 col = None
             self._coh_pending = (char, col)          # picked up by poll() on the Tk thread
@@ -7147,7 +7163,28 @@ class App:
 
     def _coh_result(self, char, col):
         self._coh_busy = False
+        if getattr(self, "_coh_tinted", False):
+            self._coh_tinted = False
+            self._coh_tint_waits = getattr(self, "_coh_tint_waits", 0) + 1
+            if self._coh_tint_waits > 20:                # about 5 minutes: try again at the next login
+                self.color_log("screen still tinted: stopped looking for now")
+                return
+            self.color_log("screen tinted by a game effect: kept the old color, will look again")
+            self._coh_tries = max(getattr(self, "_coh_tries", 0), 1)
+            self.root.after(15000, self._coh_try)
+            return
         self.color_log("read: %s for %s" % (col, char or "(name not known yet)"))
+        mild, self._coh_mild = getattr(self, "_coh_mild", False), False
+        known = (self.cfg.get("char_colors") or {}).get(char) if char else None
+        waits = getattr(self, "_coh_tint_waits", 0)
+        if mild and known and col is not None and list(cohskin.rgb_to_pct(col)) != list(known):
+            if waits >= 20:                            # still tinted after ~5 minutes: keep it, look at next login
+                return
+            self._coh_tint_waits = waits + 1
+            self.color_log("screen slightly tinted: kept %s for %s, will look again" % (known, char))
+            self._coh_tries = max(getattr(self, "_coh_tries", 0), 1)
+            self.root.after(15000, self._coh_try)
+            return
         if col is None:                     # not sure: keep the last good color and try again shortly
             if getattr(self, "_coh_tries", 0) > 0:
                 self.root.after(2500, self._coh_try)

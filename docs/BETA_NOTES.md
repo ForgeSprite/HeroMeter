@@ -14,6 +14,14 @@ If Windows says **"Windows protected your PC"**, click **More info → Run anywa
 signing certificate always get that warning. This file was built by GitHub from the code in this repo, and its
 SHA-256 checksum is in `SHA256.txt` below.
 
+### New in beta.8
+
+- **Window color matching copes with screen filters.** f.lux, Windows Night light, eye-care modes,
+  black-and-white filters and in-game tint effects no longer make it save a wrong color (white read as
+  orange or brown). It keeps your saved color and looks again later.
+- **Pick it from a game window** tells you when the screen is tinted instead of picking the wrong color.
+- **Read it automatically** waits for you to click back into the game.
+
 ### New in beta.7
 
 - **Hover help in Options**: rest the mouse on any setting's name for a short note on what it does and its

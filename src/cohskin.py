@@ -262,6 +262,42 @@ def detect_window_color(img, min_regions=2):
     return max(extra, key=lambda c: max(c)) if extra else best
 
 
+def screen_tinted(img):
+    """True when the whole game picture has a strong color cast (a sepia or tinted screen effect
+    from a power, mission or zone). Window borders can't be read then: white looks orange."""
+    import numpy as np
+    a = np.asarray(img.convert("RGB").resize((192, 108))).astype(float).reshape(-1, 3)
+    m = a.mean(axis=0)
+    ratio = m.max() / max(m.min(), 1.0)
+    mx = a.max(axis=1)
+    neutral = ((mx - a.min(axis=1)) < 0.15 * np.maximum(mx, 1)) & (mx > 30)
+    if ratio > 2.2 and neutral.mean() < 0.06:
+        return True
+    lit = mx > 40                                   # a black-and-white filter: no color anywhere
+    colorful = ((mx - a.min(axis=1)) > 0.2 * np.maximum(mx, 1)) & lit
+    return bool(lit.mean() > 0.05 and colorful.sum() < 0.01 * lit.sum())
+
+
+def white_cast(img):
+    """How far the screen's whites lean toward a color: (r, g, b) of the near-white pixels scaled so
+    the strongest channel is 1.0, or None when there are too few of them to tell. The game's white
+    text and icons should come out close to (1, 1, 1); a gentle night filter pulls blue down."""
+    import numpy as np
+    a = np.asarray(img.convert("RGB").resize((640, 360))).astype(float).reshape(-1, 3)
+    mx, mn = a.max(axis=1), a.min(axis=1)
+    w = a[(mx >= 200) & (mn >= 0.72 * mx)]
+    if len(w) < 150:
+        return None
+    m = np.median(w, axis=0)
+    return tuple(float(v) for v in m / m.max())
+
+
+def mildly_tinted(img):
+    """A gentle warm or cool cast (f.lux easing in, a light eye-care mode): whites off by over 8%."""
+    c = white_cast(img)
+    return c is not None and min(c) < 0.92
+
+
 def pick_color_at(img, x, y, radius=6):
     """The window color from a spot the player clicked on a game window's border.
 

@@ -2,6 +2,18 @@
 
 All notable changes to Hero Meter are listed here, newest first.
 
+## v2.0.0-beta.8
+
+### Fixed
+- **Window color matching** no longer reads a wrong color while the game screen is tinted by an effect (a sepia
+  or colored filter makes white borders look orange). It keeps the color it had and looks again later, and the
+  color picker says why instead of picking the tinted color.
+- A black-and-white screen (a grayscale filter or game effect) is skipped the same way, so borders aren't
+  read as gray.
+- A gentle tint (f.lux easing in, a light eye-care mode) no longer changes a character's saved color either. New
+  characters are still matched.
+- **Read it automatically** waits for you to click back into the game instead of giving up after a few seconds.
+
 ## v2.0.0-beta.7
 
 ### New
