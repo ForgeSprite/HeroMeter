@@ -105,6 +105,8 @@ HELP = {
     "alpha": "How see-through the meter is. Lower lets more of the game show through.",
     "topmost": "Keep the meter above other windows, including the game.",
     "no_focus": "Clicking the meter leaves the game active, so your keys keep going to the game.",
+    "hide_unfocused": "Minimize the meter to the taskbar while another program is focused, and bring it back "
+                      "when you click into the game. It stays visible while you use Hero Meter's own windows.",
     "auto_dpi": "Keeps the meter the same size when you move it to a monitor with different Windows scaling.",
     "ooc_fade": "Fade the meter out when you're not fighting.",
     "ooc_alpha": "How visible the meter is while faded out of combat.",

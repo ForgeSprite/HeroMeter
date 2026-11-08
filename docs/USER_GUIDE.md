@@ -359,6 +359,9 @@ See-through, fading and click-through.
 
 - Click-through sends your clicks to the game. Hold Ctrl to click the meter while it's on.
 - Hovering the meter always brings it back to full opacity.
+- **Minimize while City of Heroes isn't focused** sends the meter to the taskbar when you switch to
+  another program, and brings it back when you click into the game. It stays visible while you use
+  Hero Meter's own windows, so you can see your changes in Options.
 
 <details><summary>All settings and defaults</summary>
 
@@ -367,6 +370,7 @@ See-through, fading and click-through.
 | Opacity | 100% |
 | Always on top | On |
 | Clicking the meter doesn't take focus from the game | On |
+| Minimize while City of Heroes isn't focused | Off |
 | Match each monitor's Windows scaling automatically | On |
 | Fade out when not in combat | Off (40% out of combat, 100% in combat) |
 | Fade until mouse-over | Off (35%) |

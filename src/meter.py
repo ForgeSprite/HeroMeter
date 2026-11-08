@@ -86,6 +86,7 @@ DEFAULTS = {
     "opt_geometry": "",
     "alpha": 1.0,
     "topmost": True,
+    "hide_unfocused": False,             # minimize when City of Heroes isn't the active window
     "mode": "damage",
     "row_height": 21,
     "font_size": 15,
@@ -702,6 +703,21 @@ def exe_of_hwnd(hwnd):
 def game_is_active():
     fg = _u32().GetForegroundWindow()
     return bool(fg) and exe_of_hwnd(fg) in GAME_EXES
+
+
+def hwnd_pid(hwnd):
+    try:
+        pid = ctypes.c_ulong()
+        _u32().GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        return pid.value
+    except Exception:
+        return 0
+
+
+def own_window_is_active():
+    """True when one of Hero Meter's own windows (Options, a menu...) has the focus."""
+    fg = _u32().GetForegroundWindow()
+    return bool(fg) and hwnd_pid(fg) == os.getpid()
 
 
 def force_topmost(top):
@@ -3448,22 +3464,7 @@ class MainWindow(DarkWin):
             self.menu_modes(e.x_root, e.y_root)
 
     def minimize(self):
-        t = self.top
-        others = [m for m in self.app.meters if m is not self]
-        for m in others:
-            m.top.withdraw()
-        t.overrideredirect(False)
-        t.iconify()
-
-        def on_map(e):
-            if t.state() == "normal":
-                t.unbind("<Map>")
-                t.overrideredirect(True)
-                t.after(20, lambda: win_appwindow(t))
-                for m in others:
-                    if m in self.app.meters:
-                        m.top.deiconify()
-        t.bind("<Map>", on_map)
+        self.app.minimize_to_taskbar(auto=False)
 
     # --- menus -----------------------------------------------------------
     def menu_modes(self, x, y):
@@ -5883,6 +5884,7 @@ class OptionsWin(DarkWin):
         self.slider(0, "alpha", "Opacity (%)", 20, 100, 1, 100.0)
         self.check(0, "topmost", "Always on top (also above City of Heroes)")
         self.check(0, "no_focus", "Clicking the meter doesn't take focus from the game")
+        self.check(0, "hide_unfocused", "Minimize while City of Heroes isn't focused")
         self.check(0, "auto_dpi", "Match each monitor's Windows scaling automatically")
         self.section(0, "Fade")
         self.check(0, "ooc_fade", "Fade out when not in combat")
@@ -6571,6 +6573,10 @@ class App:
         self.main = MainWindow(self)
         self.cur = self.main
         self.meters = [self.main]
+        self._auto_minimized = False
+        self._auto_min_override = False
+        self._auto_restoring = False
+        self._min_restore = []
         self.bd_src = self.main
         self.root.deiconify()
         self.root.update_idletasks()
@@ -6832,6 +6838,8 @@ class App:
             self.reparse()
         self.save_cfg()
         self.redraw(force=True, breakdown=True)
+        if key == "hide_unfocused":
+            self.sync_game_focus()
 
     def set_theme(self, name):
         """Bar theme: only the colors of the bars."""
@@ -7361,6 +7369,7 @@ class App:
         jump above us. We only re-raise when it actually covers one of our windows (no
         needless re-ordering = no flashing)."""
         try:
+            self.sync_game_focus()
             tops = [w.top for w in self.windows()]
             for w in self.windows():
                 bd = getattr(w, "backdrop", None)
@@ -7387,6 +7396,103 @@ class App:
                     force_topmost_hwnd(h)
         except Exception:
             pass
+
+    # --- minimize to the taskbar while the game is in the background --------
+    def game_window_present(self):
+        """True when a City of Heroes window exists. Cached for a second because this is polled often."""
+        now = time.time()
+        if now - getattr(self, "_game_present_ts", 0.0) >= 1.0:
+            self._game_present_ts = now
+            self._game_present = bool(find_game_window()[0])
+        return bool(getattr(self, "_game_present", False))
+
+    def minimize_to_taskbar(self, auto=False):
+        """Iconify the main meter, so it has a taskbar button, and hide the other meter windows."""
+        main = self.main
+        t = main.top
+        if getattr(self, "_auto_minimized", False) or t.state() != "normal":
+            return False
+        visible = [m for m in self.meters if m is not main and m.top.state() == "normal"]
+        self._min_restore = visible if auto else [m for m in self.meters if m is not main]
+        self._auto_minimized = bool(auto)
+        self._auto_restoring = False
+        if auto:
+            try:
+                self.tip.hide()
+            except Exception:
+                pass
+            toast = getattr(self, "toast", None)
+            if toast is not None:
+                try:
+                    toast.hide()
+                except Exception:
+                    pass
+        for m in self.meters:
+            if m is not main:
+                try:
+                    m.top.withdraw()
+                except Exception:
+                    pass
+        t.overrideredirect(False)
+        t.iconify()
+        t.bind("<Map>", self._main_window_mapped)
+        return True
+
+    def _main_window_mapped(self, _e=None):
+        """The main meter came back from the taskbar: restore its borderless look and the other windows."""
+        t = self.main.top
+        if t.state() != "normal":
+            return
+        t.unbind("<Map>")
+        t.overrideredirect(True)
+        t.after(20, lambda: win_appwindow(t))
+        for m in getattr(self, "_min_restore", []):
+            if m in self.meters:
+                try:
+                    m.top.deiconify()
+                except Exception:
+                    pass
+        self._min_restore = []
+        restoring = getattr(self, "_auto_restoring", False)
+        self._auto_minimized = False
+        self._auto_restoring = False
+        if not restoring and not game_is_active():
+            self._auto_min_override = True      # the user pulled it back from the taskbar
+
+    def restore_from_taskbar(self):
+        """Bring the main meter back if auto-minimize put it in the taskbar."""
+        if not getattr(self, "_auto_minimized", False):
+            return
+        if self.main.top.state() == "normal":
+            self._auto_minimized = False        # already back: the Map handler will tidy up
+            return
+        self._auto_restoring = True
+        try:
+            self.main.top.deiconify()
+        except Exception:
+            self._auto_restoring = False
+
+    def sync_game_focus(self):
+        """Minimize to the taskbar while the game is running in the background, and bring the meter
+        back when City of Heroes is focused again. Hero Meter's own windows never cause a minimize."""
+        if not self.cfg.get("hide_unfocused") or getattr(self, "_quitting", False):
+            self._auto_min_override = False
+            self.restore_from_taskbar()
+            return
+        if game_is_active():
+            self._auto_min_override = False
+            self.restore_from_taskbar()
+            return
+        if not self.game_window_present():
+            self._auto_min_override = False
+            self.restore_from_taskbar()
+            return
+        if own_window_is_active():
+            self.restore_from_taskbar()
+            return
+        if getattr(self, "_auto_min_override", False):
+            return
+        self.minimize_to_taskbar(auto=True)
 
     def install_fg_hook(self):
         """React the instant the game becomes the active window (instead of up to 200 ms later)."""
@@ -8151,6 +8257,7 @@ class App:
         finally:
             self._applying = False
         self.save_views()
+        self.sync_game_focus()
         if flash:
             self.main.flash_title("Profile: " + name, 2)
 
