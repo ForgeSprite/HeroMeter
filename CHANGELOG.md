@@ -2,6 +2,10 @@
 
 All notable changes to Hero Meter are listed here, newest first.
 
+## v2.0.0
+
+The first full release. It has everything from the eight betas below, with no changes since beta.8.
+
 ## v2.0.0-beta.8
 
 ### Fixed

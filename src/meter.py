@@ -32,7 +32,7 @@ import mids
 import pettypes
 
 APP_NAME = "Hero Meter"
-VERSION = "2.0.0-beta.8"
+VERSION = "2.0.0"
 REPO = "ForgeSprite/HeroMeter"            # GitHub owner/name: update check + About links
 GUIDE_URL = "https://github.com/" + REPO + "/blob/main/docs/USER_GUIDE.md"
 # Options page -> section of the user guide (GitHub heading anchors)
