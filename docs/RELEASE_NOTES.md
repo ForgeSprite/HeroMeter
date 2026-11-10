@@ -1,4 +1,11 @@
-**Hero Meter 2.0** is the first full release: a free, Details!-style damage meter for City of Heroes Homecoming.
+**Hero Meter 2.1** is a free, Details!-style damage meter for City of Heroes Homecoming.
+
+### New in 2.1
+
+- **Minimize while City of Heroes isn't focused** (Options → Opacity & Fading, off by default). The meter goes
+  to the taskbar when you switch to another program and comes back the moment you click into the game.
+  Hero Meter's own windows, like Options, never trigger it.
+- This is Hero Meter's first community contribution. Thank you, **@cmihran**!
 
 ![Hero Meter windows](https://raw.githubusercontent.com/ForgeSprite/HeroMeter/main/docs/screenshots/meter-windows.png)
 
@@ -24,8 +31,8 @@ If Windows says **"Windows protected your PC"**, click **More info → Run anywa
 
 New to it? The **[user guide](https://github.com/ForgeSprite/HeroMeter/blob/main/docs/USER_GUIDE.md)** has pictures of every page, and you can open it any time with **⚙ → User Guide**. Hover any setting in Options for a short note on what it does.
 
-### Coming from a beta?
+### Updating?
 
-Everything from beta.1 to beta.8 is in here. Your settings carry over. The full list of changes is in the [changelog](https://github.com/ForgeSprite/HeroMeter/blob/main/CHANGELOG.md).
+Just replace your old `HeroMeter.exe` with this one. Your settings carry over. The full list of changes is in the [changelog](https://github.com/ForgeSprite/HeroMeter/blob/main/CHANGELOG.md).
 
 Found a bug? Click **⚙ → About Hero Meter → Copy diagnostics** and paste it into a [new issue](https://github.com/ForgeSprite/HeroMeter/issues/new).

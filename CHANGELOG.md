@@ -2,7 +2,7 @@
 
 All notable changes to Hero Meter are listed here, newest first.
 
-## Unreleased
+## v2.1.0
 
 ### New
 - **Minimize while City of Heroes isn't focused** (Options → Opacity & Fading, off by default): the meter
