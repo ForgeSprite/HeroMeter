@@ -7335,6 +7335,11 @@ class App:
         self._health_tick = getattr(self, "_health_tick", 0) + 1
         if self._health_tick % 600 == 300:
             self.load_my_chars()
+        if self._health_tick % 10 == 5:
+            try:
+                self.sync_game_focus()
+            except Exception:
+                pass
         if self._health_tick % 30 == 1:
             try:
                 self.check_log_health()
@@ -7369,7 +7374,6 @@ class App:
         jump above us. We only re-raise when it actually covers one of our windows (no
         needless re-ordering = no flashing)."""
         try:
-            self.sync_game_focus()
             tops = [w.top for w in self.windows()]
             for w in self.windows():
                 bd = getattr(w, "backdrop", None)
@@ -7494,12 +7498,21 @@ class App:
             return
         self.minimize_to_taskbar(auto=True)
 
+    def _foreground_changed(self):
+        """Windows tells us another window came to the front: keep the meter above the game, and
+        minimize or restore it if "Minimize while City of Heroes isn't focused" is on."""
+        self.raise_over_game()
+        try:
+            self.sync_game_focus()
+        except Exception:
+            pass
+
     def install_fg_hook(self):
         """React the instant the game becomes the active window (instead of up to 200 ms later)."""
         try:
             proc_t = ctypes.WINFUNCTYPE(None, ctypes.c_void_p, ctypes.c_ulong, ctypes.c_void_p, ctypes.c_long,
                                         ctypes.c_long, ctypes.c_ulong, ctypes.c_ulong)
-            self._fg_proc = proc_t(lambda *a: self.raise_over_game())
+            self._fg_proc = proc_t(lambda *a: self._foreground_changed())
             u = _u32()
             u.SetWinEventHook.restype = ctypes.c_void_p
             u.SetWinEventHook.argtypes = [ctypes.c_uint, ctypes.c_uint, ctypes.c_void_p, proc_t,

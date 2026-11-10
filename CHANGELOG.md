@@ -2,6 +2,14 @@
 
 All notable changes to Hero Meter are listed here, newest first.
 
+## Unreleased
+
+### New
+- **Minimize while City of Heroes isn't focused** (Options → Opacity & Fading, off by default): the meter
+  goes to the taskbar when you switch to another program and comes back when you click into the game.
+  Hero Meter's own windows never trigger it. Thanks to **@cmihran** for this one, the first community
+  contribution!
+
 ## v2.0.0
 
 The first full release. It has everything from the eight betas below, with no changes since beta.8.
