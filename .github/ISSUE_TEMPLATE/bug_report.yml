@@ -1,0 +1,32 @@
+name: Bug report
+description: Something in Hero Meter doesn't work the way it should.
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you see, and what did you expect to see instead?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: How can it be repeated?
+      description: The steps that lead to it, if you know them. Character type and power set help too.
+      placeholder: |
+        1. Open Options
+        2. Click ...
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics
+      description: "In Hero Meter: ⚙ → About Hero Meter → Copy diagnostics, then paste here. Account names are blanked out automatically."
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else?
+      description: Screenshots, or freeze-log.txt from the settings folder if Hero Meter froze.

@@ -132,6 +132,12 @@ Go to **⚙ → About Hero Meter → Copy diagnostics** and paste the result int
 
 ---
 
+## Contributing
+
+Ideas, bug reports and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for how it works.
+
+---
+
 ## Building it yourself
 
 You'll need Windows, Python 3.10 or newer, and PyInstaller.

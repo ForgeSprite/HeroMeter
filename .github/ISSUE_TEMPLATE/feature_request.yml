@@ -1,0 +1,27 @@
+name: Feature idea
+description: Suggest something new for Hero Meter.
+labels: ["idea"]
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: What's the idea?
+      description: Describe what you'd like Hero Meter to do.
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why would it help?
+      description: When would you use it? Which characters or situations is it for?
+    validations:
+      required: true
+  - type: dropdown
+    id: build
+    attributes:
+      label: Would you like to build it yourself?
+      options:
+        - "No, just suggesting it"
+        - "Yes, I'd like to send a pull request"
+    validations:
+      required: true
