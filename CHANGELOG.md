@@ -2,6 +2,24 @@
 
 All notable changes to Hero Meter are listed here, newest first.
 
+## v2.1.1
+
+### Fixed
+- **Extra damage from the same hit counts as one hit.** With Rage (or any power that deals two damage
+  types), each attack writes two damage lines. They're now added together as one hit, so hit counts,
+  averages and the biggest hit are right. Area attacks and damage over time still count every target
+  and tick.
+- **Mez alerts only fire when the mez actually lands.** The game logs every hold, stun, sleep or immobilize
+  attempt, even when your mez protection stops it. Alerts now wait for the line the game writes when it lands
+  ("You are held!", "You are unable to use any powers!", "You have been put to sleep!", "You have been
+  immobilized!"), so Brutes, Tanks and anyone with protection no longer get false alarms. A mez your
+  protection breaks in the same moment doesn't alert either, and one stun only alerts once.
+- **Check boxes in Options** work on the first click wherever you click them. Clicks on the see-through parts
+  of a check box (with the City of Heroes skin) were often lost.
+
+### New
+- **Taunt alert:** a pop-up when an enemy taunts you and it lands (Options → Alerts, on by default).
+
 ## v2.1.0
 
 ### New

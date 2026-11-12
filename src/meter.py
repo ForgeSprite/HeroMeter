@@ -32,7 +32,7 @@ import mids
 import pettypes
 
 APP_NAME = "Hero Meter"
-VERSION = "2.1.0"
+VERSION = "2.1.1"
 REPO = "ForgeSprite/HeroMeter"            # GitHub owner/name: update check + About links
 GUIDE_URL = "https://github.com/" + REPO + "/blob/main/docs/USER_GUIDE.md"
 # Options page -> section of the user guide (GitHub heading anchors)
@@ -231,6 +231,7 @@ DEFAULTS = {
     "records_popup": True,               # pop-up when you set a new record
     "records_by_build": False,           # separate records for each linked build
     "records_min_fight": 20,             # shortest fight (seconds) that counts for per-second records
+    "alert_taunt": True,                 # alert when an enemy taunts you (and it lands)
     "last_version": "",                  # the version that last ran (for the "what's new" notice)
 }
 
@@ -1305,7 +1306,7 @@ class Toast:
 MEZ_WORD = {"holds": "HELD", "held": "HELD", "stuns": "STUNNED", "stunned": "STUNNED", "sleeps": "ASLEEP",
             "deep sleeps": "ASLEEP", "asleep": "ASLEEP", "terrifies": "TERRIFIED", "terrorizes": "TERRIFIED",
             "terrified": "TERRIFIED", "confuses": "CONFUSED", "confused": "CONFUSED",
-            "immobilizes": "IMMOBILIZED"}
+            "immobilizes": "IMMOBILIZED", "immobilized": "IMMOBILIZED", "taunts": "TAUNTED", "taunted": "TAUNTED"}
 
 
 class ColorPicker:
@@ -1450,6 +1451,24 @@ class Backdrop:
             if cur != getattr(self, "_cur", ""):
                 self._cur = cur
                 self.t.configure(cursor=cur)
+        # Check boxes and buttons: a click that lands on a see-through pixel of them arrives here, and a
+        # generated click only works if Tk saw the mouse enter the widget first, so most were lost.
+        # Press them directly instead (once, on release, like a normal click).
+        try:
+            cls = w.winfo_class()
+        except Exception:
+            cls = ""
+        if cls in ("Checkbutton", "Radiobutton", "Button") and seq in ("<ButtonPress-1>", "<ButtonRelease-1>",
+                                                                        "<Double-Button-1>", "<B1-Motion>"):
+            if seq == "<ButtonRelease-1>":
+                try:
+                    inside = (w.winfo_rootx() <= e.x_root < w.winfo_rootx() + w.winfo_width() and
+                              w.winfo_rooty() <= e.y_root < w.winfo_rooty() + w.winfo_height())
+                    if inside and str(w.cget("state")) != "disabled":
+                        w.invoke()
+                except Exception:
+                    pass
+            return
         try:
             kw = dict(x=e.x_root - w.winfo_rootx(), y=e.y_root - w.winfo_rooty(), rootx=e.x_root, rooty=e.y_root)
             if seq == "<B1-Motion>":
@@ -5150,6 +5169,7 @@ class OptionsWin(DarkWin):
         hl.bind("<Leave>", lambda e: hl.configure(fg=C["gold"]))
         self._help_targets = []
         self._help_by_label(top)
+        self._sure_clicks(top)
         navw = tk.Frame(self.body, bg=C["menu_bg"], width=px(178))
         navw.pack(side="left", fill="y")
         navw.pack_propagate(False)
@@ -5292,6 +5312,7 @@ class OptionsWin(DarkWin):
         self._wide = None
         getattr(self, page)()
         self._help_by_label(f)
+        self._sure_clicks(f)
         f.update_idletasks()
         self._relayout()
         if keep:
@@ -5382,6 +5403,31 @@ class OptionsWin(DarkWin):
         widget._hm_help = True
         self._help_targets.append((widget, text))
         self._hoverer().attach(widget, title, text, default)
+
+    def _sure_clicks(self, root):
+        """Check boxes toggle on every click. Tk's own check box only counts a click if it saw the mouse
+        come in first, and with the see-through skin the mouse keeps slipping between this window and
+        the frame behind it, so many clicks were dropped. Handle the click here instead."""
+        for c in root.winfo_children():
+            if c.winfo_class() in ("Checkbutton", "Radiobutton") and not getattr(c, "_hm_click", False):
+                c._hm_click = True
+
+                def press(e, w=c):
+                    w._hm_down = True
+                    if getattr(self, "_hover", None) is not None:
+                        self._hover.hide()
+                    return "break"
+
+                def release(e, w=c):
+                    down, w._hm_down = getattr(w, "_hm_down", False), False
+                    inside = 0 <= e.x < w.winfo_width() and 0 <= e.y < w.winfo_height()
+                    if down and inside and str(w.cget("state")) != "disabled":
+                        w.invoke()
+                    return "break"
+                c.bind("<ButtonPress-1>", press)
+                c.bind("<Double-Button-1>", press)
+                c.bind("<ButtonRelease-1>", release)
+            self._sure_clicks(c)
 
     def _help_by_label(self, root):
         """Buttons and labels whose help is looked up by their text ("@Text" in OPTION_HELP)."""
@@ -6341,6 +6387,7 @@ class OptionsWin(DarkWin):
                      "It only reacts to what's happening now, never to old lines read when the meter starts.")
         self.check(0, "alert_mez", "When you're held, stunned, slept, terrified or confused")
         self.check(0, "alert_immob", "Also when you're immobilized (it happens a lot, so it's off at first)")
+        self.check(0, "alert_taunt", "When an enemy taunts you")
         self.check(0, "alert_pet_dead", "When one of your pets is defeated")
         self.check(0, "alert_pet_mez", "When one of your pets is held, stunned or slept")
         self.check(0, "alert_pet_log", "When pet or pseudo-pet damage isn't reaching the chat log")
@@ -6903,7 +6950,11 @@ class App:
         if not force and (now - a[0] > 12 or getattr(self, "logged_out", False)):
             return                          # old news (e.g. lines read when the meter started)
         kind = a[1]
-        if kind in ("mez", "mez_pet") and a[4] == "Immobilizes" and not c.get("alert_immob", False) and not force:
+        if kind in ("mez", "mez_pet") and a[4].lower() in ("immobilizes", "immobilized") \
+                and not c.get("alert_immob", False) and not force:
+            return
+        if kind in ("mez", "mez_pet") and a[4].lower() in ("taunts", "taunted") \
+                and not c.get("alert_taunt", True) and not force:
             return
         if kind == "mez":
             if not c.get("alert_mez", True) and not force:

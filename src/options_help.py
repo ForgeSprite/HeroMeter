@@ -27,8 +27,10 @@ HELP = {
                  "pets into your own bar.",
     # --- Alerts
     "alert_mez": "A pop-up above the meter when you're held, stunned, slept, terrified or confused, "
-                 "with who did it and with what.",
+                 "with who did it and with what. Only when it lands: attempts your mez protection "
+                 "stops don't count.",
     "alert_immob": "Also warn when you're immobilized. It happens a lot in some fights, so it starts off.",
+    "alert_taunt": "A pop-up when an enemy taunts you and it lands.",
     "alert_pet_dead": "A pop-up when one of your pets is defeated, and by what.",
     "alert_pet_mez": "A pop-up when one of your pets is held, stunned or slept.",
     "alert_pet_log": "Warns once a day if you use pet powers but no pet damage reaches the chat log. "

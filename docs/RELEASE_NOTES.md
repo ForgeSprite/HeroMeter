@@ -1,5 +1,14 @@
 **Hero Meter 2.1** is a free, Details!-style damage meter for City of Heroes Homecoming.
 
+### Fixed in 2.1.1
+
+- **Hit counts with Rage** (or any power that deals two damage types): one swing now counts as one hit, so
+  averages and the biggest hit are right.
+- **Mez alerts only when it lands.** Attempts your mez protection stops no longer set off alerts, so Brutes
+  and Tanks stop getting false alarms. A mez your protection breaks instantly doesn't alert either.
+- **New taunt alert** when an enemy taunts you (Options → Alerts).
+- **Check boxes in Options** toggle on every click.
+
 ### New in 2.1
 
 - **Minimize while City of Heroes isn't focused** (Options → Opacity & Fading, off by default). The meter goes

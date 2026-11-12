@@ -39,8 +39,17 @@ R_XP = re.compile(r"^You gain " + NUM + r" experience")
 R_ZONE = re.compile(r"^Entering (.+?)\.$")
 R_SEEN = re.compile(r"Your (.+?) (?:power is autohit|has made you|has |is recharged)|You activated the (.+?) power"
                     r"|with your (.+?) (?:for [\d.]|granting)|^(.+?) is recharged")
-R_MEZ = re.compile(r"^(.+?) (Holds|Stuns|Sleeps|Deep Sleeps|Terrifies|Terrorizes|Confuses|Immobilizes) you with their (.+?)\.?$")
-R_YOU_MEZ = re.compile(r"^You are (held|stunned|asleep|terrified|confused)!$")
+R_MEZ = re.compile(r"^(.+?) (Holds|Stuns|Sleeps|Deep Sleeps|Terrifies|Terrorizes|Confuses|Immobilizes|Taunts) you with their (.+?)\.?$")
+# The line the game writes when a mez really lands on you (found in real logs):
+#   hold "You are held!"   stun "You are unable to use any powers!"   sleep "You have been put to sleep!"
+#   immobilize "You have been immobilized!"   taunt "You are being taunted!"
+R_YOU_MEZ = re.compile(r"^You (?:are|have been) (held|stunned|asleep|put to sleep|terrified|confused|immobilized|being taunted|unable to use any powers)!$")
+LANDED = {"put to sleep": "asleep", "being taunted": "taunted", "unable to use any powers": "stunned"}
+# "X Holds you with their Y" is only the attempt: it is printed even when mez protection stops it.
+# "You are held!" is printed only when it really lands, so that line decides the alert.
+MEZ_STATE = {"Holds": "held", "Stuns": "stunned", "Sleeps": "asleep", "Deep Sleeps": "asleep",
+             "Terrifies": "terrified", "Terrorizes": "terrified", "Confuses": "confused",
+             "Immobilizes": "immobilized", "Taunts": "taunted"}
 R_DEFEATS = re.compile(r"^(.+?) has defeated (.+?)\.?$")
 R_ACTIVATE = re.compile(r"^You activated the (.+?) power\.?$")
 R_NAME = re.compile(r"^(?:Welcome to City of Heroes|Now entering .+?), (.+?)!$")
@@ -95,7 +104,7 @@ class Stat:
     """Amount + hit statistics for one power (or one source/target bucket)."""
     __slots__ = ("total", "n_direct", "direct_total", "n_norm", "norm_total", "nmin", "nmax",
                  "n_tick", "tick_total", "tmax", "flairs", "rolls", "roll_hits", "roll_miss",
-                 "chance_sum", "chance_n", "dtypes", "targets", "sources")
+                 "chance_sum", "chance_n", "dtypes", "targets", "sources", "_last")
 
     def __init__(self):
         self.total = 0.0
@@ -117,12 +126,16 @@ class Stat:
         self.dtypes = {}            # damage type -> total
         self.targets = {}           # target -> total
         self.sources = {}           # source -> total (used by "taken by ability")
+        self._last = None           # (flair, amount) of the last direct hit, for extra packets
 
     @property
     def count(self):
         return self.n_direct + self.n_tick
 
-    def add(self, amount, dot=False, flair=None, dtype=None, target=None, source=None):
+    def add(self, amount, dot=False, flair=None, dtype=None, target=None, source=None, extra=False):
+        if extra and not dot and self._last is not None:
+            self._add_extra(amount, dtype, target, source)
+            return
         self.total += amount
         if dot:
             self.n_tick += 1
@@ -132,6 +145,7 @@ class Stat:
         else:
             self.n_direct += 1
             self.direct_total += amount
+            self._last = (flair, amount)
             if flair:
                 f = self.flairs.get(flair)
                 if f is None:
@@ -146,6 +160,33 @@ class Stat:
                 self.norm_total += amount
                 self.nmin = amount if self.nmin is None else min(self.nmin, amount)
                 self.nmax = max(self.nmax, amount)
+        if dtype:
+            self.dtypes[dtype] = self.dtypes.get(dtype, 0.0) + amount
+        if target:
+            self.targets[target] = self.targets.get(target, 0.0) + amount
+        if source:
+            self.sources[source] = self.sources.get(source, 0.0) + amount
+
+    def _add_extra(self, amount, dtype, target, source):
+        """More damage from the same hit (Rage's bonus, a second damage type): it joins the last hit
+        instead of counting as a hit of its own, so hit counts and averages stay right."""
+        self.total += amount
+        self.direct_total += amount
+        lf, la = self._last
+        new = la + amount
+        if lf:
+            f = self.flairs.get(lf)
+            if f is not None:
+                f[1] += amount
+                if f[2] == la:
+                    f[2] = new
+                f[3] = max(f[3], new)
+        else:
+            self.norm_total += amount
+            if self.nmin == la:
+                self.nmin = new
+            self.nmax = max(self.nmax, new)
+        self._last = (lf, new)
         if dtype:
             self.dtypes[dtype] = self.dtypes.get(dtype, 0.0) + amount
         if target:
@@ -580,19 +621,24 @@ class Parser:
                 target, power, amt, dtype, dot, flair = m.groups()
                 amt = num(amt)
                 power = self.pname(power, bool(dot))
+                extra = False
+                if not dot:
+                    key = (who, power, target, int(ts))
+                    extra = not flair and getattr(self, "_last_pkt", None) == key
+                    self._last_pkt = key
                 for seg in self._targets(ts):
                     a = seg.actor(who, kind)
                     a.damage += amt
                     a.touch(ts)
                     a.recent.append((ts, amt))
-                    _get(a.powers, power).add(amt, bool(dot), flair, dtype, target)
+                    _get(a.powers, power).add(amt, bool(dot), flair, dtype, target, extra=extra)
                     step = 5 if seg.is_overall else 1
                     b = int(ts) // step
                     a.timeline[b] = a.timeline.get(b, 0.0) + amt
                     a.tl_step = step
                     e = seg.enemy(target)
                     e.received += amt
-                    _get(e.received_by, (who, power)).add(amt, bool(dot), flair, dtype)
+                    _get(e.received_by, (who, power)).add(amt, bool(dot), flair, dtype, extra=extra)
                 self._enemy_seen[target] = ts
                 if kind == "player":
                     self._own_hit_ts = ts
@@ -603,6 +649,7 @@ class Parser:
             if m:
                 target, power, chance = m.groups()
                 power = self.pname(power)
+                self._last_pkt = None               # a new roll: the next damage is a new hit
                 if kind == "pet" or not self._is_friendly_name(target):
                     chance = float(chance) if chance else None
                     for seg in self._targets(ts):
@@ -620,6 +667,7 @@ class Parser:
             if m:
                 target, power, chance = m.groups()
                 power = self.pname(power)
+                self._last_pkt = None
                 chance = float(chance)
                 for seg in self._targets(ts):
                     a = seg.actor(who, kind)
@@ -825,13 +873,54 @@ class Parser:
         if " you with their " in body:
             m = R_MEZ.match(body)
             if m:
-                self.alerts.append((ts, "mez_pet" if kind == "pet" else "mez", who) + m.groups())
+                src, verb, power = m.groups()
+                state = MEZ_STATE.get(verb)
+                if kind == "pet" or state is None:     # pets: their attempts are all we see
+                    self.alerts.append((ts, "mez_pet" if kind == "pet" else "mez", who) + m.groups())
+                    return
+                self._mez_try = (ts, state, src, verb, power)
+                hit = getattr(self, "_mez_hit", None)   # "You are held!" came first: now we know who
+                if hit and hit[1] == state and 0 <= ts - hit[0] <= 2:
+                    self._mez_hit = None
+                    self.alerts.append((ts, "mez", who, src, verb, power))
                 return
-        if kind == "player" and body.startswith("You are ") and body.endswith("!"):
+        if kind == "player" and body.startswith("You ") and body.endswith("!"):
             m = R_YOU_MEZ.match(body)
             if m:
-                self.alerts.append((ts, "mez", who, "", m.group(1), ""))
+                state = LANDED.get(m.group(1), m.group(1))
+                t = getattr(self, "_mez_try", None)
+                if t and state == "stunned" and t[1] in ("held", "stunned"):
+                    state = t[1]                    # "unable to use any powers" from a hold or a stun
+                seen = getattr(self, "_mez_last", None)
+                if seen is None:
+                    seen = self._mez_last = {}
+                if t and t[1] == state and 0 <= ts - t[0] <= 2:   # it landed: say who and with what
+                    self._mez_try = None
+                    seen[state] = ts
+                    al = (ts, "mez", who, t[2], t[3], t[4])
+                    self._mez_alert = (state, al)
+                    self.alerts.append(al)
+                elif seen.get(state) is not None and ts - seen[state] < 8:
+                    seen[state] = ts                # the game repeats it each time you press a power
+                else:
+                    seen[state] = ts
+                    self._mez_hit = (ts, state)
+                    al = (ts, "mez", who, "", state, "")
+                    self._mez_alert = (state, al)
+                    self.alerts.append(al)
                 return
+        if kind == "player" and body.startswith("You are no longer "):
+            seen = getattr(self, "_mez_last", None)
+            state = body[18:].rstrip(".!")
+            if seen:
+                seen.pop(state, None)            # it wore off: the next one alerts again
+            ma = getattr(self, "_mez_alert", None)
+            if ma and ma[0] == state and ts - ma[1][0] <= 1:
+                self._mez_alert = None           # broken at once (protection kicked in): no alert
+                try:
+                    self.alerts.remove(ma[1])
+                except ValueError:
+                    pass
         if kind == "player" and " has defeated " in body:
             m = R_DEFEATS.match(body)
             if m:
