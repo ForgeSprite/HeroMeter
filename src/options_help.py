@@ -35,7 +35,11 @@ HELP = {
     "alert_pet_mez": "A pop-up when one of your pets is held, stunned or slept.",
     "alert_pet_log": "Warns once a day if you use pet powers but no pet damage reaches the chat log. "
                      "That means the Pet channels aren't in a chat tab yet.",
-    "alert_sound": "Play the Windows alert sound with each pop-up.",
+    "alert_sound": "Play a sound with each pop-up. Pick which one below.",
+    "alert_sound_name": "Which sound plays: the Windows alert, one of the built-in tones, or your own .wav file. "
+                        "You hear it as you pick it.",
+    "@\u25b6 Play": "Hear the sound that's picked now.",
+    "@Choose your own (.wav)\u2026": "Use any .wav file on your PC as the alert sound.",
     "@Show a test alert": "Shows an example alert, so you can see how it looks with your skin.",
     # --- Records
     "records_mode": "Full keeps seven records. Light keeps three: biggest hit, best fight DPS and most "

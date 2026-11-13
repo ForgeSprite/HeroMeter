@@ -19,6 +19,7 @@ import cohassets
 import cohskin
 import cohframe
 import logmgr
+import sounds
 import records
 try:
     from options_index import OPTIONS_INDEX
@@ -32,7 +33,7 @@ import mids
 import pettypes
 
 APP_NAME = "Hero Meter"
-VERSION = "2.1.1"
+VERSION = "2.2.0"
 REPO = "ForgeSprite/HeroMeter"            # GitHub owner/name: update check + About links
 GUIDE_URL = "https://github.com/" + REPO + "/blob/main/docs/USER_GUIDE.md"
 # Options page -> section of the user guide (GitHub heading anchors)
@@ -232,6 +233,8 @@ DEFAULTS = {
     "records_by_build": False,           # separate records for each linked build
     "records_min_fight": 20,             # shortest fight (seconds) that counts for per-second records
     "alert_taunt": True,                 # alert when an enemy taunts you (and it lands)
+    "alert_sound_name": "default",       # which sound (see sounds.CHOICES)
+    "alert_sound_file": "",              # your own .wav, for "custom"
     "last_version": "",                  # the version that last ran (for the "what's new" notice)
 }
 
@@ -322,6 +325,7 @@ MODES = [
     ("defense", "Avoidance", "MISC"),
     ("deaths", "Deaths", "MISC"),
     ("xp", "Experience", "MISC"),
+    ("inf", "Influence", "MISC"),
 ]
 MODE_LABEL = {m: l for m, l, _ in MODES}
 
@@ -780,6 +784,72 @@ def set_noactivate(top, on):
 def key_down(vk):
     try:
         return bool(ctypes.windll.user32.GetAsyncKeyState(vk) & 0x8000)
+    except Exception:
+        return False
+
+
+def capture_window(hwnd, w, h, flag=0):
+    """The window's own pixels (whatever is behind it, or on top of it, left out), or None."""
+    try:
+        u, g = _u32(), ctypes.windll.gdi32
+        from PIL import Image
+        hw = ctypes.c_void_p(hwnd)
+        sdc = u.GetDC(None)
+        mdc = g.CreateCompatibleDC(ctypes.c_void_p(sdc))
+        bmp = g.CreateCompatibleBitmap(ctypes.c_void_p(sdc), w, h)
+        old = g.SelectObject(ctypes.c_void_p(mdc), ctypes.c_void_p(bmp))
+        # Plain PrintWindow keeps the see-through key color as it is (the full-content mode turns it
+        # black, which would hide the CoH frame); the full-content mode is the fallback.
+        ok = u.PrintWindow(hw, ctypes.c_void_p(mdc), flag)
+        class BIH(ctypes.Structure):
+            _fields_ = [("biSize", ctypes.c_uint32), ("biWidth", ctypes.c_int32), ("biHeight", ctypes.c_int32),
+                        ("biPlanes", ctypes.c_uint16), ("biBitCount", ctypes.c_uint16),
+                        ("biCompression", ctypes.c_uint32), ("biSizeImage", ctypes.c_uint32),
+                        ("biXPelsPerMeter", ctypes.c_int32), ("biYPelsPerMeter", ctypes.c_int32),
+                        ("biClrUsed", ctypes.c_uint32), ("biClrImportant", ctypes.c_uint32)]
+        bi = BIH(ctypes.sizeof(BIH), w, -h, 1, 32, 0, 0, 0, 0, 0, 0)
+        buf = ctypes.create_string_buffer(w * h * 4)
+        g.SelectObject(ctypes.c_void_p(mdc), ctypes.c_void_p(old))
+        got = g.GetDIBits(ctypes.c_void_p(mdc), ctypes.c_void_p(bmp), 0, h, buf, ctypes.byref(bi), 0)
+        g.DeleteObject(ctypes.c_void_p(bmp))
+        g.DeleteDC(ctypes.c_void_p(mdc))
+        u.ReleaseDC(None, ctypes.c_void_p(sdc))
+        if not ok or got != h:
+            return None
+        img = Image.frombuffer("RGB", (w, h), buf.raw, "raw", "BGRX", 0, 1)
+        if img.getextrema() == ((0, 0), (0, 0), (0, 0)):
+            return None
+        return img.copy()
+    except Exception:
+        return None
+
+
+def copy_image_to_clipboard(img):
+    """Put a picture on the Windows clipboard (as a DIB, which Discord and most apps paste)."""
+    import io
+    try:
+        b = io.BytesIO()
+        img.convert("RGB").save(b, "BMP")
+        data = b.getvalue()[14:]                 # a DIB is a BMP without its 14-byte file header
+        u, k = ctypes.windll.user32, ctypes.windll.kernel32
+        k.GlobalAlloc.restype = ctypes.c_void_p
+        k.GlobalAlloc.argtypes = [ctypes.c_uint, ctypes.c_size_t]
+        k.GlobalLock.restype = ctypes.c_void_p
+        k.GlobalLock.argtypes = [ctypes.c_void_p]
+        k.GlobalUnlock.argtypes = [ctypes.c_void_p]
+        u.SetClipboardData.argtypes = [ctypes.c_uint, ctypes.c_void_p]
+        u.SetClipboardData.restype = ctypes.c_void_p
+        if not u.OpenClipboard(None):
+            return False
+        try:
+            u.EmptyClipboard()
+            h = k.GlobalAlloc(0x0002, len(data))     # GMEM_MOVEABLE
+            p = k.GlobalLock(h)
+            ctypes.memmove(p, data, len(data))
+            k.GlobalUnlock(h)
+            return bool(u.SetClipboardData(8, h))  # CF_DIB
+        finally:
+            u.CloseClipboard()
     except Exception:
         return False
 
@@ -1637,7 +1707,7 @@ def recolor(w, mapping):
     for ch in w.winfo_children():
         recolor(ch, mapping)
 FRIENDLY_MODES = {"damage", "dps", "taken", "heal", "hps", "healed", "absorb", "protect", "kills",
-                  "accuracy", "defense", "xp"}
+                  "accuracy", "defense", "xp", "inf"}
 GROUPINGS = [
     ("Show every pet", []),
     ("Group pets by tier", ["@other", "@t1", "@t2", "@t3"]),
@@ -1751,6 +1821,28 @@ def actor_view(app, seg, which="rows"):
     if "@all" in nodes:
         emit("@all")
     return out
+
+
+def shown_actors(app, seg):
+    """The real combatants the meter lists (you, your pets, your team), not, say, the character you
+    played earlier today, whose fights still sit in Overall."""
+    if seg is None:
+        return {}
+    actor_view(app, seg, "rows")
+    nodes = getattr(app, "nodes", None) or {}
+    if "@all" not in nodes:
+        return dict(seg.actors)
+    keep = set()
+
+    def walk(k):
+        n = nodes.get(k)
+        if n is None:
+            return
+        keep.add(k)
+        for c in (n["children"] or []):
+            walk(c)
+    walk("@all")
+    return {k: a for k, a in seg.actors.items() if k in keep}
 
 
 def taken_by_ability(actors):
@@ -1871,9 +1963,16 @@ def build_rows(app, seg, mode=None):
                 p = 100.0 * a.def_miss / a.def_rolls
                 friendly(a, p, "%.1f%% dodged (%d/%d)" % (p, a.def_miss, a.def_rolls), "%.1f%%" % p)
     elif mode == "xp":
+        hrs = earn_hours(app, seg, dur)
         for a in actors.values():
             if a.xp > 0:
-                friendly(a, a.xp, "%s (%s/min)" % (fmt(a.xp), fmt(a.xp * 60 / dur)), fmt(a.xp))
+                friendly(a, a.xp, "%s (%s/hr)" % (fmt(a.xp), fmt(a.xp / hrs)), fmt(a.xp))
+    elif mode == "inf":
+        MODE_LABEL["inf"] = currency_name(app)
+        hrs = earn_hours(app, seg, dur)
+        for a in actors.values():
+            if getattr(a, "inf", 0) > 0:
+                friendly(a, a.inf, "%s (%s/hr)" % (fmt(a.inf), fmt(a.inf / hrs)), fmt(a.inf))
     elif mode == "deaths":
         all_deaths = app.parser.deaths
         for d in reversed(seg.deaths):
@@ -1995,7 +2094,7 @@ def _build_breakdown(app, seg, mode, key):
                 agg[t] = agg.get(t, 0.0) + v
         return [(t, v, actor_color(t, "pet") if t in actors else C["enemy"]) for t, v in agg.items()]
 
-    if mode in ("damage", "dps", "accuracy", "kills", "xp", "protect", "taken", "defense",
+    if mode in ("damage", "dps", "accuracy", "kills", "xp", "inf", "protect", "taken", "defense",
                 "heal", "hps", "healed", "absorb"):
         a = actors.get(key)
         if a is None:
@@ -2072,8 +2171,15 @@ def _build_breakdown(app, seg, mode, key):
                     if x.kind == "pet" and x.taken > 0]
             bd.tabs = [("Pets Took Damage", "list", pets)]
         elif mode == "xp":
-            bd.summary = [("Experience", fmt(a.xp)), ("Per Minute", fmt(a.xp * 60 / dur)),
-                          ("Kills", str(a.kill_count)), ("", "")]
+            hrs = earn_hours(app, seg, dur)
+            bd.summary = [("Experience", fmt(a.xp)), ("Per Hour", fmt(a.xp / hrs)),
+                          ("Per Minute", fmt(a.xp / hrs / 60)), ("Kills", str(a.kill_count))]
+            bd.tabs = [("Defeated", "list", [(k, float(v), C["enemy"]) for k, v in a.kills.items()])]
+        elif mode == "inf":
+            hrs = earn_hours(app, seg, dur)
+            name = currency_name(app)
+            bd.summary = [(name, fmt(a.inf)), ("Per Hour", fmt(a.inf / hrs)),
+                          ("Per Minute", fmt(a.inf / hrs / 60)), ("Kills", str(a.kill_count))]
             bd.tabs = [("Defeated", "list", [(k, float(v), C["enemy"]) for k, v in a.kills.items()])]
         return bd
 
@@ -2861,7 +2967,23 @@ def demo_rows(app):
     return rows
 
 
-TOTAL_MODES = ("damage", "dps", "taken", "heal", "hps", "healed", "absorb", "protect", "kills", "xp")
+TOTAL_MODES = ("damage", "dps", "taken", "heal", "hps", "healed", "absorb", "protect", "kills", "xp", "inf")
+
+
+def currency_name(app):
+    """Influence, Infamy or Information: whatever the game called it last."""
+    return (getattr(app.parser, "currency", None) or "influence").title()
+
+
+def earn_hours(app, seg, dur):
+    """Hours to divide by for per-hour rates: a fight's own length, or for Overall the real time since
+    it started (farming includes walking between groups)."""
+    if getattr(seg, "is_overall", False):
+        now = getattr(app.parser, "last_line_ts", None) or time.time()
+        first = getattr(seg, "earn_first", None)           # from the first reward, not from midnight
+        if first:
+            dur = max(dur, now - first)
+    return max(dur, 60.0) / 3600.0
 
 
 def touching(a, b, tol):
@@ -3168,13 +3290,20 @@ class MainWindow(DarkWin):
         c = self.app.cfg
         left, mid, right = (self.app.status_value(c[k], seg) for k in ("sb_left", "sb_center", "sb_right"))
         gap = px(10)
-        r_edge = W - px(16) - (f.measure(right) if right else 0)        # where the right text starts
+        rx = W - px(16)
+        try:                                                            # keep clear of the resize corner
+            g = self.grip
+            if g.winfo_ismapped() and g.winfo_rooty() < st.winfo_rooty() + h:
+                rx = min(rx, g.winfo_rootx() - st.winfo_rootx() - px(4))
+        except Exception:
+            pass
+        r_edge = rx - (f.measure(right) if right else 0)                # where the right text starts
         if mid:                                                         # the middle text never runs into the right
             mid = truncate(f, mid, max(0, 2 * min(W // 2 - px(6), r_edge - gap - W // 2)))
         m_edge = (W // 2 - f.measure(mid) // 2) if mid else r_edge
         if left:                                                        # long names are shortened, not overlapped
             left = truncate(f, left, max(0, m_edge - gap - px(6)))
-        for text, anchor, x in ((left, "w", px(6)), (mid, "center", W // 2), (right, "e", W - px(16))):
+        for text, anchor, x in ((left, "w", px(6)), (mid, "center", W // 2), (right, "e", rx)):
             if text:
                 st.create_text(x, h // 2, text=text, font=f, fill=C["dim"], anchor=anchor)
 
@@ -3496,6 +3625,8 @@ class MainWindow(DarkWin):
                     items.append({"sep": True})
                 items.append({"header": True, "label": cat})
                 last = cat
+            if m == "inf":
+                label = currency_name(app)
             items.append({"label": label, "check": self.mode == m, "cmd": lambda m=m: app.set_mode(m, self)})
         items.append({"sep": True})
         items.append({"header": True, "label": "WINDOW"})
@@ -3520,6 +3651,12 @@ class MainWindow(DarkWin):
                  {"label": "Current Segment", "check": app.seg_choice == "current",
                   "cmd": lambda: app.set_segment("current", self)},
                  {"sep": True}]
+        hist = getattr(app, "history_day", None)
+        if hist:
+            items[0] = {"header": True, "label": "SEGMENTS  \u2014  " + hist.strftime("%a %b %d").upper()}
+            items.insert(1, {"label": "\u2190 Back to today", "color": C["gold"], "cmd": app.back_to_today})
+        items.insert(len(items) - 1, {"label": "Earlier days\u2026",
+                                      "cmd": lambda: app.root.after(10, lambda: app.menu_days(x, y, self))})
         segs = list(reversed(p.segments))
         if not segs:
             items.append({"label": "No fights yet", "disabled": True})
@@ -3536,7 +3673,13 @@ class MainWindow(DarkWin):
         items = [{"header": True, "label": "REPORT (copies to clipboard)"},
                  {"label": "Top 5 - one line for game chat", "cmd": lambda: app.report(5, True, self)},
                  {"label": "Top 10 - one line for game chat", "cmd": lambda: app.report(10, True, self)},
-                 {"label": "Full report (multi-line)", "cmd": lambda: app.report(40, False, self)}]
+                 {"label": "Full report (multi-line)", "cmd": lambda: app.report(40, False, self)},
+                 {"sep": True},
+                 {"header": True, "label": "PICTURE"},
+                 {"label": "Copy as a picture (paste into Discord)",
+                  "cmd": lambda: app.root.after(250, lambda: app.share_picture(self))},
+                 {"label": "Save as a picture\u2026",
+                  "cmd": lambda: app.root.after(250, lambda: app.share_picture(self, save=True))}]
         DMenu(app, x, y, items)
 
     def menu_options(self, x, y):
@@ -6087,6 +6230,42 @@ class OptionsWin(DarkWin):
                 a.main.flash_title("Type a name for the layout first", 2.5)
         self.button(row, "Save current layout", save).pack(side="left", padx=px(6))
 
+    def _look_preview_args(self, wtheme, w, h, on, title, border=None):
+        """What cohframe.preview needs to draw one City of Heroes skin card."""
+        a = self.app
+        t = WINDOW_THEMES.get(wtheme) or WINDOW_THEMES["coh"]
+        rgb = tuple(border or (a.coh_rgb() if wtheme == a.cfg.get("window_theme") else t["border"]))
+        bars = [PLAYER_COLOR, TIER_COLORS.get(3, "#a335ee"), PET_COLORS[0]]
+        font = next((f for f in getattr(a, "_coh_font_files", []) if "demibold" in f.lower()), None)
+        return ((w, h, rgb, [hex2rgb(c) for c in bars], font),
+                dict(scale=max(0.3, coh_scale(a) * 0.45), check=on, title=title))
+
+    def _warm_previews(self):
+        """Draw the skin and window theme cards in the background as soon as Options opens, so those
+        pages are quick the first time you click them (each card takes ~50 ms to draw)."""
+        try:
+            c = self.app.cfg
+            jobs = []
+            cur = c.get("window_theme", "coh")
+            if "coh" in WINDOW_SKINS:
+                jobs.append(self._look_preview_args(cur, px(192), px(100), c.get("skin") == "coh",
+                                                    WINDOW_SKINS["coh"]["label"]))
+            if c.get("skin", "coh") == "coh":
+                for key, t in [(k, v) for k, v in WINDOW_THEMES.items() if not k.startswith("__")]:
+                    jobs.append(self._look_preview_args(key, px(186), px(92), cur == key, t["label"],
+                                                        border=t["border"]))
+        except Exception:
+            return
+        import threading
+
+        def work():
+            for args, kw in jobs:
+                try:
+                    cohframe.preview(*args, **kw)
+                except Exception:
+                    pass
+        threading.Thread(target=work, daemon=True).start()
+
     def _draw_look_card(self, cv, skin, wtheme, w, h, on, title, border=None):
         """A small picture of a window in a given skin + window theme, with the current bar colors."""
         a = self.app
@@ -6096,9 +6275,8 @@ class OptionsWin(DarkWin):
         if skin == "coh":
             try:
                 from PIL import ImageTk
-                img = cohframe.preview(w, h, rgb, [hex2rgb(c) for c in bars],
-                                       next((f for f in getattr(a, "_coh_font_files", []) if "demibold" in f.lower()),
-                                            None), scale=max(0.3, coh_scale(a) * 0.45), check=on, title=title)
+                args, kw = self._look_preview_args(wtheme, w, h, on, title, border)
+                img = cohframe.preview(*args, **kw)
                 cv._img = ImageTk.PhotoImage(img, master=a.root)
                 cv.configure(bg="#0a0a0c")
                 cv.create_image(0, 0, image=cv._img, anchor="nw")
@@ -6392,11 +6570,43 @@ class OptionsWin(DarkWin):
         self.check(0, "alert_pet_mez", "When one of your pets is held, stunned or slept")
         self.check(0, "alert_pet_log", "When pet or pseudo-pet damage isn't reaching the chat log")
         self.check(0, "alert_sound", "Play a sound with each alert")
+        self.dropdown(0, "alert_sound_name", "Sound", sounds.CHOICES, setter=self._set_alert_sound)
+        srow = tk.Frame(self.cols[0], bg=C["bg"])
+        srow.pack(fill="x", pady=(px(2), 0))
+        self.button(srow, "\u25b6 Play", lambda: sounds.play(a.cfg.get("alert_sound_name", "default"),
+                                                            a.cfg.get("alert_sound_file"))).pack(side="left")
+        self.button(srow, "Choose your own (.wav)\u2026", self._pick_alert_sound).pack(side="left", padx=px(6))
+        own = a.cfg.get("alert_sound_file")
+        if own:
+            self.note(0, "Your own sound: " + os.path.basename(own))
         row = tk.Frame(self.cols[0], bg=C["bg"])
         row.pack(fill="x", pady=px(6))
         self.button(row, "Show a test alert",
                     lambda: a.alert((time.time(), "mez", a.build_char(), "Test Enemy", "Holds", "Example Power"),
                                     force=True)).pack(side="left")
+
+    def _set_alert_sound(self, key):
+        a = self.app
+        if key == "custom" and not (a.cfg.get("alert_sound_file") and os.path.isfile(a.cfg["alert_sound_file"])):
+            self._pick_alert_sound()
+            return
+        a.set_cfg("alert_sound_name", key)
+        sounds.play(key, a.cfg.get("alert_sound_file"))      # hear it as you pick it
+        self.show_page("page_alerts")
+
+    def _pick_alert_sound(self):
+        a = self.app
+        path = filedialog.askopenfilename(parent=self.top, title="Choose an alert sound",
+                                          filetypes=[("WAV sounds", "*.wav"), ("All files", "*.*")])
+        if not path:
+            return
+        if not path.lower().endswith(".wav"):
+            a.main.flash_title("Please pick a .wav file", 3)
+            return
+        a.set_cfg("alert_sound_file", path)
+        a.set_cfg("alert_sound_name", "custom")
+        sounds.play("custom", path)
+        self.show_page("page_alerts")
 
     def page_records(self):
         a = self.app
@@ -7005,11 +7215,7 @@ class App:
             self.toast = Toast(self)
         self.toast.show(title, detail, accent, text, flat_bg)
         if c.get("alert_sound", False):
-            try:
-                import winsound
-                winsound.MessageBeep(0x30)
-            except Exception:
-                pass
+            sounds.play(c.get("alert_sound_name", "default"), c.get("alert_sound_file"))
 
     # --- personal records ---------------------------------------------------------------
     def records_build(self, char):
@@ -7407,16 +7613,19 @@ class App:
             return "Overall" if seg.is_overall else "#%d %s" % (seg.number, seg.name)
         if key == "timer":
             return mmss(dur)
+        if key in ("dps", "damage", "kills"):
+            shown = shown_actors(self, seg)
+            total = sum(a.damage for a in shown.values())
         if key == "dps":
-            return "DPS " + fps(seg.total_damage / dur)
+            return "DPS " + fps(total / dur)
         if key == "my_dps":
             return "You " + fps((player.damage if player else 0) / dur)
         if key == "damage":
-            return fmt(seg.total_damage)
+            return fmt(total)
         if key == "deaths":
             return "\u2620 %d" % len(seg.deaths)
         if key == "kills":
-            return "Kills %d" % sum(a.kill_count for a in seg.actors.values())
+            return "Kills %d" % sum(a.kill_count for a in shown.values())
         return ""
 
     # --- staying above the game ---------------------------------------------
@@ -7758,7 +7967,89 @@ class App:
                 pass
         self.redraw(force=True)
 
+    # --- earlier days -------------------------------------------------------
+    def available_days(self, limit=45):
+        """Days with a chat log, newest first, today left out: [(date, source)], where source is a log
+        file or (zip, member) inside a monthly archive made by log clean-up."""
+        import datetime as _dt, zipfile
+        d = self.logs_dir()
+        if not d:
+            return []
+        today = _dt.date.today()
+        days = {}
+        for name in os.listdir(d):
+            m = logmgr.LOG_RE.match(name)
+            if m:
+                day = _dt.date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+                if day != today:
+                    days[day] = os.path.join(d, name)
+        ad = os.path.join(d, logmgr.ARCHIVE)
+        if os.path.isdir(ad):
+            for name in sorted(os.listdir(ad), reverse=True):
+                if not logmgr.ARCH_RE.match(name):
+                    continue
+                try:
+                    with zipfile.ZipFile(os.path.join(ad, name)) as zf:
+                        for mem in zf.namelist():
+                            m = logmgr.LOG_RE.match(os.path.basename(mem))
+                            if m:
+                                day = _dt.date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+                                days.setdefault(day, (os.path.join(ad, name), mem))
+                except Exception:
+                    pass
+        return sorted(days.items(), reverse=True)[:limit]
+
+    def menu_days(self, x, y, win=None):
+        days = self.available_days()
+        items = [{"header": True, "label": "EARLIER DAYS"}]
+        if not days:
+            items.append({"label": "No earlier chat logs found", "disabled": True})
+        for day, src in days[:31]:
+            zipped = isinstance(src, tuple)
+            items.append({"label": day.strftime("%a %b %d"), "right": "zipped" if zipped else "",
+                          "check": day == getattr(self, "history_day", None),
+                          "cmd": lambda d=day, s=src: self.root.after(10, lambda: self.view_day(d, s))})
+        DMenu(self, x, y, items, min_width=200)
+
+    def view_day(self, day, src):
+        """Look back at an earlier day: its fights, deaths and breakdowns, read from that day's log.
+        Nothing is changed: zipped days are unpacked into a temporary copy, and records only ever come
+        from fights seen live."""
+        path = src
+        if isinstance(src, tuple):
+            import zipfile, tempfile
+            out = os.path.join(tempfile.gettempdir(), "HeroMeter history")
+            os.makedirs(out, exist_ok=True)
+            path = os.path.join(out, os.path.basename(src[1]))
+            try:
+                with zipfile.ZipFile(src[0]) as zf, zf.open(src[1]) as fin, open(path, "wb") as fout:
+                    fout.write(fin.read())
+            except Exception:
+                self.main.flash_title("Couldn't open that day's log", 3)
+                return
+        self.history_day = day
+        keep = self.cfg.get("load_history", True)
+        self.cfg["load_history"] = True             # read the whole day
+        try:
+            self.open_log(path)
+        finally:
+            self.cfg["load_history"] = keep
+        self._log_warn = False
+        for m in self.meters:
+            self.set_segment("overall", m)
+        self.main.flash_title("Viewing %s" % day.strftime("%a %b %d"), 4)
+
+    def back_to_today(self):
+        self.history_day = None
+        path = cp.todays_log(self.logs_dir()) if self.cfg["log_auto"] else self.cfg.get("log_path")
+        if path:
+            self.open_log(path)
+        for m in self.meters:
+            self.set_segment("current", m)
+        self.main.flash_title("Back to today", 2)
+
     def set_log_auto(self, on):
+        self.history_day = None
         self.cfg["log_auto"] = bool(on)
         self.save_cfg()
         if on:
@@ -8114,6 +8405,7 @@ class App:
     def open_options(self):
         if self.options is None:
             self.options = OptionsWin(self)
+            self.root.after(300, lambda: self.options and self.options._warm_previews())
         self.options.lift()
 
     def manual_recap(self):
@@ -8579,6 +8871,11 @@ class App:
     def check_log_health(self):
         """Warn when the game is running but the chat log has stopped growing
         (typically a character that doesn't have 'Log Chat' turned on)."""
+        if getattr(self, "history_day", None):       # looking at an earlier day: its log never grows
+            if getattr(self, "_log_warn", False):
+                self._log_warn = False
+                self.redraw(force=True)
+            return
         now = time.time()
         hwnd, title = find_game_window()
         warn = False
@@ -8671,6 +8968,115 @@ class App:
         self.root.update()
         self.cur.flash_title("Copied to clipboard!")
 
+    # --- share as a picture --------------------------------------------------
+    def share_image(self, win):
+        """A tidy picture of the meter: who and what at the top, the window as it looks on screen,
+        and the key numbers underneath."""
+        from PIL import Image, ImageDraw, ImageFont, ImageGrab
+        self.use(win)
+        seg = self.get_segment()
+        t = win.top
+        x, y, w, h = t.winfo_rootx(), t.winfo_rooty(), t.winfo_width(), t.winfo_height()
+        bg = (14, 18, 26)
+        shot = None
+        own = capture_window(hwnd_of(t), w, h) or capture_window(hwnd_of(t), w, h, 2)
+        if own is not None:
+            # Just the meter: its frame drawn fresh, its bars and text from the window itself, on a solid
+            # background, so whatever is behind the meter on screen stays out of the picture.
+            shot = Image.new("RGBA", (w, h), bg + (255,))
+            if is_coh(self):
+                try:
+                    frame = cohframe.render_fast_rgba(w, h, _hex_rgb(C["border"]), coh_scale(self),
+                                                      tab=not getattr(win, "NO_TAB", False), glow=False,
+                                                      body_alpha=float(self.cfg.get("coh_body_alpha", 0.8)))
+                    shot.alpha_composite(frame.convert("RGBA"))
+                except Exception:
+                    pass
+                key = _hex_rgb(COH_KEY)
+                mask = Image.eval(own.convert("RGB"), lambda v: v)
+                r, gch, b = mask.split()
+                m = Image.merge("RGB", (r.point(lambda v: 255 if v != key[0] else 0),
+                                        gch.point(lambda v: 255 if v != key[1] else 0),
+                                        b.point(lambda v: 255 if v != key[2] else 0))).convert("L")
+                m = m.point(lambda v: 255 if v else 0)
+                shot.paste(own, (0, 0), m)
+            else:
+                shot.paste(own, (0, 0))
+            shot = shot.convert("RGB")
+        if shot is None:
+            shot = ImageGrab.grab((x, y, x + w, y + h), all_screens=True).convert("RGB")
+
+        def font(size, bold=False):
+            for f in (("segoeuib.ttf", "arialbd.ttf") if bold else ("segoeui.ttf", "arial.ttf")):
+                try:
+                    return ImageFont.truetype(f, size)
+                except Exception:
+                    pass
+            return ImageFont.load_default()
+        k = max(1.0, S)
+        pad = int(28 * k)
+        W = max(shot.width + 2 * pad, int(620 * k))
+        head_h, foot_h = int(100 * k), int(104 * k)
+        img = Image.new("RGB", (W, head_h + shot.height + foot_h), (14, 18, 26))
+        d = ImageDraw.Draw(img)
+        d.rectangle([0, 0, W, int(6 * k)], fill=_hex_rgb(C["border"]) if is_coh(self) else (60, 120, 200))
+        who = self.parser.player if self.parser.player and self.parser.player != "You" else "Hero Meter"
+        d.text((pad, int(22 * k)), who, font=font(int(26 * k), True), fill=(232, 236, 242))
+        mode = MODE_LABEL.get(win.mode, "")
+        if seg is None:
+            what = "Current fight"
+        elif self.seg_choice == "overall" or getattr(seg, "is_overall", False):
+            what = "Overall  \u00b7  %d fights" % len(self.parser.segments)
+        else:
+            what = seg.name
+        day = getattr(self, "history_day", None)
+        when = day.strftime("%b %d, %Y") if day else time.strftime("%b %d, %Y")
+        sub = "  \u00b7  ".join(p for p in (mode, what, mmss(seg.duration() if seg else 0), when) if p)
+        d.text((pad, int(60 * k)), sub, font=font(int(16 * k)), fill=(140, 150, 165))
+        img.paste(shot, ((W - shot.width) // 2, head_h))
+        fy = head_h + shot.height + int(16 * k)
+        d.line([pad, fy, W - pad, fy], fill=(44, 54, 72), width=1)
+        stats = []
+        if seg is not None:
+            dur = max(1.0, seg.duration())
+            shown = shown_actors(self, seg)
+            dmg = sum(a.damage for a in shown.values())
+            kills = sum(getattr(a, "kill_count", 0) for a in shown.values())
+            stats = [("Total damage", fmt(dmg)), ("DPS", fps(dmg / dur)), ("Kills", str(kills)),
+                     ("Deaths", str(len(seg.deaths)))]
+        cw = (W - 2 * pad) // max(1, len(stats))
+        for i, (label, val) in enumerate(stats):
+            sx = pad + i * cw
+            d.text((sx, fy + int(12 * k)), val, font=font(int(24 * k), True), fill=(255, 205, 100))
+            d.text((sx, fy + int(46 * k)), label, font=font(int(14 * k)), fill=(140, 150, 165))
+        d.text((W - pad, img.height - int(12 * k)), "Hero Meter", font=font(int(13 * k), True),
+               fill=(90, 100, 118), anchor="rs")
+        return img
+
+    def share_picture(self, win, save=False):
+        self.use(win)
+        if self.get_segment() is None:
+            win.flash_title("Nothing to share yet: pick a fight or Overall", 4)
+            return
+        try:
+            img = self.share_image(win)
+        except Exception:
+            win.flash_title("Couldn't make the picture", 3)
+            return
+        if save:
+            path = filedialog.asksaveasfilename(parent=self.root, title="Save the meter as a picture",
+                                                defaultextension=".png", initialfile="Hero Meter %s.png" %
+                                                time.strftime("%Y-%m-%d %H%M"),
+                                                filetypes=[("PNG picture", "*.png")])
+            if path:
+                img.save(path)
+                win.flash_title("Picture saved", 2)
+            return
+        if copy_image_to_clipboard(img):
+            win.flash_title("Picture copied: paste it into Discord", 3)
+        else:
+            win.flash_title("Couldn't copy the picture", 3)
+
     # --- main loop -------------------------------------------------------
     def _bd_view(self):
         src = getattr(self, "bd_src", None)
@@ -8738,7 +9144,7 @@ class App:
             if not backlog:
                 self.parser.tick(now)
             # day rollover for automatic mode
-            if self.cfg["log_auto"] and now - self._last_day_check > 10:
+            if self.cfg["log_auto"] and now - self._last_day_check > 10 and not getattr(self, "history_day", None):
                 self._last_day_check = now
                 path = cp.todays_log(self.logs_dir())
                 if path and path != self.log_path:

@@ -2,6 +2,30 @@
 
 All notable changes to Hero Meter are listed here, newest first.
 
+## v2.2.0
+
+### New
+- **Earlier days:** Segments → Earlier days… opens any earlier day's fights, deaths and breakdowns, including
+  days zipped by log clean-up. ← Back to today returns to live play. Nothing is changed, and records only
+  ever come from fights seen live.
+- **Alert sounds:** pick the Windows alert, one of five built-in tones (Chime, Ping, Alarm, Soft tone,
+  Power down), or your own .wav file (Options → Alerts). You hear each one as you pick it.
+- **Influence per hour:** a new Influence mode (Infamy for villains, Information for Praetorians, named the
+  way the game names it), and Experience now shows per hour too. For Overall, "per hour" counts real time,
+  so travel between fights is included.
+- **Share as a picture:** Report → Copy as a picture puts a tidy image of the meter on the clipboard, with
+  your character, the fight, the time and the key totals around it. Paste it straight into Discord, or use
+  Save as a picture… for a PNG file.
+
+### Changed
+- The Window Themes and Skin pages in Options open faster the first time: their preview cards are drawn in
+  the background as soon as Options opens.
+
+### Fixed
+- The status bar's damage, DPS and kills now count the same combatants the meter lists. After switching
+  characters, Overall no longer adds your earlier character's damage to the bottom-line numbers.
+- The status bar's right-hand text no longer runs under the resize corner.
+
 ## v2.1.1
 
 ### Fixed

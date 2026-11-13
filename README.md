@@ -29,7 +29,7 @@ The meter looks for Homecoming on its own. If the game is running, it reads the 
 
 ### The meter
 
-Fifteen modes: damage done, DPS, damage taken (by enemy or by ability), healing, HPS, healing taken, absorbs, bodyguard protection, kills, accuracy, avoidance, deaths and experience. Each fight is its own segment, plus an Overall total.
+Sixteen modes: damage done, DPS, damage taken (by enemy or by ability), healing, HPS, healing taken, absorbs, bodyguard protection, kills, accuracy, avoidance, deaths, experience and influence. Each fight is its own segment, plus an Overall total.
 
 Click a bar to see that character's powers. Right-click to go back.
 

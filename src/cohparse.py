@@ -36,6 +36,9 @@ R_ABS_IN = re.compile(r"^(.+?) grants you " + NUM + r" points? of absorption(?: 
 R_PROTECT = re.compile(r"^Your henchmen protect you from " + NUM + r" damage")
 R_KILL = re.compile(r"^You have defeated (.+?)\.?$")
 R_XP = re.compile(r"^You gain " + NUM + r" experience")
+# Influence for heroes, infamy for villains, information for Praetorians (from the Rewards channel).
+R_INF = re.compile(r"(?:^You (?:gain|receive|received|got|earn|earned)|\band) " + NUM +
+                   r" (influence|infamy|information)\b", re.I)
 R_ZONE = re.compile(r"^Entering (.+?)\.$")
 R_SEEN = re.compile(r"Your (.+?) (?:power is autohit|has made you|has |is recharged)|You activated the (.+?) power"
                     r"|with your (.+?) (?:for [\d.]|granting)|^(.+?) is recharged")
@@ -271,6 +274,7 @@ class Actor:
         self.protect_n = 0
         self.kills = {}                 # enemy -> count
         self.xp = 0.0
+        self.inf = 0.0
         self.rolls = 0
         self.roll_hits = 0
         self.chance_sum = 0.0
@@ -312,6 +316,7 @@ class Actor:
         self.protect += o.protect
         self.protect_n += o.protect_n
         self.xp += o.xp
+        self.inf += getattr(o, "inf", 0.0)
         tl = getattr(o, "timeline", None)
         if tl:
             self.tl_step = getattr(o, "tl_step", 1)
@@ -382,6 +387,7 @@ class Segment:
         self.enemies = {}               # name -> Enemy
         self.deaths = []
         self.xp = 0.0
+        self.inf = 0.0
         self._duration = 0.0            # used by the overall segment
 
     # duration in seconds (never zero so per-second math works)
@@ -827,6 +833,21 @@ class Parser:
                     seg.enemy(target).kills += 1
                 self.version += 1
                 return
+        if kind == "player" and body.startswith("You ") and (
+                "influence" in body or "infamy" in body or "information" in body) and \
+                "Consignment" not in body and "Black Market" not in body:
+            m = R_INF.search(body)
+            if m:                               # earned by playing (sales at the market are left out)
+                amt = num(m.group(1))
+                self.currency = m.group(2).lower()
+                for seg in self._targets(ts, combat=False):
+                    seg.actor(who, kind).inf += amt
+                    seg.inf += amt
+                    if not getattr(seg, "earn_first", None):
+                        seg.earn_first = ts
+                self.version += 1
+                if not body.startswith("You gain ") or " experience" not in body:
+                    return
         if body.startswith("You gain ") and kind == "player":
             m = R_XP.match(body)
             if m:
@@ -834,6 +855,8 @@ class Parser:
                 for seg in self._targets(ts, combat=False):
                     seg.actor(who, kind).xp += amt
                     seg.xp += amt
+                    if not getattr(seg, "earn_first", None):
+                        seg.earn_first = ts
                 self.version += 1
                 return
         if kind == "player" and (body.startswith("Welcome to City of Heroes") or body.startswith("Now entering")):

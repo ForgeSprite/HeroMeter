@@ -38,7 +38,7 @@ That's it. The meter finds the game and today's log on its own.
 
 1. The title shows which fight you're looking at. Right-click it to change what the meter shows.
 2. Segments: pick a fight, the current fight, or Overall.
-3. Report: copy the numbers, ready to paste in game chat.
+3. Report: copy the numbers, ready to paste in game chat. **Copy as a picture** gives you an image of the meter to paste into Discord, and **Save as a picture…** saves it as a PNG.
 4. Reset: clear all fights.
 5. ⚙ Options, User Guide, profiles and more.
 6. Minimize.
@@ -68,13 +68,16 @@ Right-click the title and pick a mode.
 |---|---|
 | Damage | Damage Done, DPS, Damage Taken, Enemy Damage Taken, Damage Taken by Ability, Bodyguard Protection, Kills |
 | Healing | Healing Done, HPS, Healing Taken, Absorbs Granted |
-| Other | Accuracy, Avoidance, Deaths, Experience |
+| Other | Accuracy, Avoidance, Deaths, Experience, Influence |
+
+Experience and Influence show how much you earned per hour. Influence is called Infamy on villains and Information on Praetorians, matching what the game says.
 
 ### Fights and Overall
 
 - Every fight is saved as its own segment. A fight ends after 10 seconds of quiet.
 - Overall adds up everything since you last pressed Reset.
 - Click the Segments button to switch between them.
+- **Earlier days…** in the Segments menu opens any earlier day that has a chat log, zipped ones included. Pick **← Back to today** when you're done.
 
 ### When something happens to you
 
@@ -182,6 +185,7 @@ Which pop-ups you get.
 - Immobilize happens a lot, so it starts off.
 - The log doesn't say how long an effect lasts, so there are no timers.
 - **Show a test alert** shows what one looks like.
+- Turn on the sound and pick one: the Windows alert, a built-in Chime, Ping, Alarm, Soft tone or Power down, or **Choose your own (.wav)**. Press **▶ Play** to hear it.
 
 <details><summary>All settings and defaults</summary>
 
@@ -192,7 +196,9 @@ Which pop-ups you get.
 | When one of your pets is defeated | On |
 | When one of your pets is held, stunned or slept | Off |
 | When pet or pseudo-pet damage isn't reaching the chat log | On |
+| When an enemy taunts you | On |
 | Play a sound with each alert | Off |
+| Sound | Windows alert |
 
 </details>
 

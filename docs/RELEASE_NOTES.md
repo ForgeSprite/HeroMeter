@@ -1,20 +1,23 @@
-**Hero Meter 2.1** is a free, Details!-style damage meter for City of Heroes Homecoming.
+**Hero Meter 2.2** is a free, Details!-style damage meter for City of Heroes Homecoming.
 
-### Fixed in 2.1.1
+### New in 2.2
 
-- **Hit counts with Rage** (or any power that deals two damage types): one swing now counts as one hit, so
-  averages and the biggest hit are right.
-- **Mez alerts only when it lands.** Attempts your mez protection stops no longer set off alerts, so Brutes
-  and Tanks stop getting false alarms. A mez your protection breaks instantly doesn't alert either.
-- **New taunt alert** when an enemy taunts you (Options → Alerts).
-- **Check boxes in Options** toggle on every click.
+- **Share as a picture:** Report → **Copy as a picture** puts a clean image of the meter on your clipboard, with
+  your character, the fight and the key totals. Paste it straight into Discord, or **Save as a picture…** for a PNG.
+- **Earlier days:** Segments → **Earlier days…** opens any earlier day's fights, deaths and breakdowns, zipped
+  logs included. **← Back to today** returns to live play.
+- **Influence per hour:** a new Influence mode (Infamy for villains, Information for Praetorians), and Experience
+  now shows per hour too.
+- **Alert sounds:** the Windows alert, five built-in tones, or your own .wav file (Options → Alerts).
+- **Faster Options:** the Window Themes and Skin pages open quickly the first time.
+- **Fixed:** the status bar's damage, DPS and kills match what the meter lists, even after switching characters,
+  and its right-hand text no longer hides under the resize corner.
 
-### New in 2.1
+### Recent fixes (2.1.1)
 
-- **Minimize while City of Heroes isn't focused** (Options → Opacity & Fading, off by default). The meter goes
-  to the taskbar when you switch to another program and comes back the moment you click into the game.
-  Hero Meter's own windows, like Options, never trigger it.
-- This is Hero Meter's first community contribution. Thank you, **@cmihran**!
+- One swing with Rage (or any two-damage-type power) counts as one hit.
+- Mez alerts only when the mez actually lands, plus a new taunt alert.
+- Minimize while City of Heroes isn't focused (2.1, thanks to **@cmihran**).
 
 ![Hero Meter windows](https://raw.githubusercontent.com/ForgeSprite/HeroMeter/main/docs/screenshots/meter-windows.png)
 
@@ -28,11 +31,11 @@ If Windows says **"Windows protected your PC"**, click **More info → Run anywa
 
 ### What it does
 
-- **Fifteen modes:** damage, DPS, healing, damage taken, kills, deaths, accuracy, absorbs, bodyguard and more, for every fight and overall.
+- **Sixteen modes:** damage, DPS, healing, damage taken, kills, deaths, accuracy, absorbs, bodyguard, experience, influence and more, for every fight and overall.
 - **Masterminds welcome:** every pet on its own bar, grouped by tier, or rolled into yours. Pseudo pets like Rain of Fire count as your damage.
 - **Breakdowns:** click a bar for powers, Shift+click for hits, averages, crits and a DPS-over-time graph.
 - **Death recap:** the last few seconds before you died, hit by hit.
-- **Alerts:** a pop-up when you're held, stunned or slept, or a pet goes down.
+- **Alerts:** a pop-up and a sound of your choice when you're held, stunned, slept or taunted, or a pet goes down.
 - **Personal records** for each character.
 - **Your build vs. what you actually do,** from Mids Reborn or CoH Sidekick builds.
 - **Looks like the game:** the City of Heroes skin matches each character's own window color, with themes, layouts and profiles if you want something else.
