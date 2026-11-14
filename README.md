@@ -29,7 +29,9 @@ The meter looks for Homecoming on its own. If the game is running, it reads the 
 
 ### The meter
 
-Sixteen modes: damage done, DPS, damage taken (by enemy or by ability), healing, HPS, healing taken, absorbs, bodyguard protection, kills, accuracy, avoidance, deaths, experience and influence. Each fight is its own segment, plus an Overall total.
+Sixteen modes: damage done, DPS, damage taken (by enemy or by ability), healing, HPS, healing taken, absorbs, bodyguard protection, kills, accuracy, avoidance, deaths, experience and influence. Each fight is its own segment, plus an Overall total. Experience and influence also show how much you earn per hour (influence is Infamy for villains and Information for Praetorians, just like in game).
+
+**Earlier days…** in the Segments menu opens the fights, deaths and breakdowns from any earlier day you played, zipped logs included.
 
 Click a bar to see that character's powers. Right-click to go back.
 
@@ -57,9 +59,15 @@ When you die, the recap shows the last few seconds hit by hit: who killed you, w
 
 ### Alerts
 
-A short pop-up above the meter tells you when you're held, stunned, slept, terrified or confused (and by whom, with what), or when one of your pets is defeated. Immobilize alerts, pet mez alerts and a sound can be switched on in **Options → Alerts**. The pop-up matches the skin you're using.
+A short pop-up above the meter tells you when you're held, stunned, slept, terrified, confused or taunted (and by whom, with what), or when one of your pets is defeated. It only fires when the effect actually lands, so a mez your protection stops won't set it off, which matters for Brutes and Tanks. Immobilize alerts and pet mez alerts can be switched on in **Options → Alerts**, along with a sound: the Windows alert, five built-in tones, or your own `.wav` file. The pop-up matches the skin you're using.
 
 ![A hold alert popping up above the meter](docs/guide/alert.gif)
+
+### Share a picture
+
+**Report → Copy as a picture** puts a clean picture of the meter on your clipboard, ready to paste into Discord: the meter as you have it set up, your character, the fight, and the totals. Whatever is behind the meter on your screen stays out. **Save as a picture…** saves it as a PNG instead.
+
+![A shared meter picture](docs/guide/share.png)
 
 ### Personal records
 
@@ -90,12 +98,14 @@ Hero Meter keeps each character's best numbers from fights it saw live: biggest 
 
   ![Searching Options for "fade"](docs/guide/options-search.gif)
 
+- **Stays out of the way**: fade the meter when you're not fighting, or turn on **Minimize while City of Heroes isn't focused** so it drops to the taskbar while you're in another program and comes back when you click into the game.
+- **Hover any setting** in Options for a short note on what it does and its default.
 - **Show example bars** fills the meter with sample numbers while Options is open, so you can try looks without a fight.
 - **Profiles** save your whole setup, including window layout. You can export and import them, and give each character its own profile so the meter switches when you log in.
 
 ### It keeps up with your characters
 
-Hero Meter knows which character you're on. When you go to character select, it goes back to "You" until the next character logs in. If that character doesn't have Log Chat turned on, the meter tells you within a few seconds and gives you the `/logchat` command to paste.
+Hero Meter knows which character you're on. When you go to character select, it goes back to "You" until the next character logs in. If that character doesn't have Log Chat turned on, the meter tells you within a few seconds and can type `/logchat` into the game for you.
 
 ### Your build vs. what you actually do
 
