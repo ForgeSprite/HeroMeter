@@ -7,6 +7,7 @@ Short answers, with pictures. Jump to what you need.
 | Set it up for the first time | [Set up in three steps](#set-up-in-three-steps) |
 | Know what the buttons do | [The meter at a glance](#the-meter-at-a-glance) |
 | See damage, healing, deaths and more | [Everyday use](#everyday-use) |
+| Share the meter in Discord | [Share a picture of the meter](#share-a-picture-of-the-meter) |
 | Find one setting | [Options](#options) |
 | Fix a problem | [Troubleshooting](#troubleshooting) |
 
@@ -81,11 +82,24 @@ Experience and Influence show how much you earned per hour. Influence is called 
 
 ### When something happens to you
 
-A pop-up above the meter tells you when you're held, stunned, slept, terrified or confused, and by whom. It also tells you when a pet is defeated.
+A pop-up above the meter tells you when you're held, stunned, slept, terrified, confused or taunted, and by whom. It also tells you when a pet is defeated.
+
+Alerts only appear when the effect actually lands. If your mez protection stops it, or breaks it the same instant, there's no alert, so Brutes and Tanks don't get false alarms. Want a sound too? Pick one on the [Alerts](#alerts) page.
 
 ![A hold alert above the meter](guide/alert.gif)
 
 Click it to close it early. You choose which alerts you get on the [Alerts](#alerts) page.
+
+### Share a picture of the meter
+
+Click **Report** and choose **Copy as a picture**, then paste it into Discord or anywhere else. **Save as a picture…** saves it as a PNG file instead.
+
+![A shared meter picture](guide/share.png)
+
+- The picture shows the meter exactly as you have it set up, on a plain background. Whatever is behind the meter on your screen stays out.
+- Your character's name, the mode, the fight, how long it lasted and the date go across the top.
+- Total damage, DPS, kills and deaths go along the bottom.
+- It shares the fight the meter is showing. Pick a fight or Overall in the Segments menu first.
 
 ### More handy tricks
 
