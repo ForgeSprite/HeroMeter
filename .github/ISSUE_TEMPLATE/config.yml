@@ -1,5 +1,8 @@
 blank_issues_enabled: true
 contact_links:
+  - name: Questions and ideas
+    url: https://github.com/ForgeSprite/HeroMeter/discussions
+    about: Ask a question, talk through an idea, or share your meter. Use an issue only for bugs and agreed features.
   - name: User guide
     url: https://github.com/ForgeSprite/HeroMeter/blob/main/docs/USER_GUIDE.md
     about: Setup steps, every setting explained, and answers to common problems.

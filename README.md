@@ -136,6 +136,10 @@ Hero Meter only reads files on your own PC: your chat logs, your account's chara
 
 Settings are saved in `%APPDATA%\Hero Meter`. To keep everything next to the exe instead (handy on a USB stick), put an empty file named `portable.txt` beside `HeroMeter.exe`.
 
+## Questions and ideas
+
+Ask a question, suggest an idea or share a picture of your meter in [Discussions](https://github.com/ForgeSprite/HeroMeter/discussions).
+
 ## Found a bug?
 
 Go to **⚙ → About Hero Meter → Copy diagnostics** and paste the result into a [new issue](../../issues/new), along with what happened. Account names are blanked out of the diagnostics automatically.

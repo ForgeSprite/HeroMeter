@@ -2,6 +2,11 @@
 
 Thanks for wanting to help! Bug reports, ideas and code are all welcome.
 
+## Got a question?
+
+Ask in [Discussions](https://github.com/ForgeSprite/HeroMeter/discussions) under **Q&A**. Ideas you're still shaping are welcome in **Ideas** too, and
+**Show and tell** is the place to share your meter.
+
 ## Found a bug?
 
 Open a [bug report](../../issues/new?template=bug_report.yml). The most useful thing you can include is the
