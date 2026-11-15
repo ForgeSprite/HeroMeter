@@ -59,7 +59,7 @@ When you die, the recap shows the last few seconds hit by hit: who killed you, w
 
 ### Alerts
 
-A short pop-up above the meter tells you when you're held, stunned, slept, terrified, confused or taunted (and by whom, with what), or when one of your pets is defeated. It only fires when the effect actually lands, so a mez your protection stops won't set it off, which matters for Brutes and Tanks. Immobilize alerts and pet mez alerts can be switched on in **Options → Alerts**, along with a sound: the Windows alert, five built-in tones, or your own `.wav` file. The pop-up matches the skin you're using.
+A short pop-up above the meter tells you when you're held, stunned, slept, terrified, confused or taunted (and by whom, with what), or when one of your pets is defeated. It only fires when the effect actually lands, so a mez your protection stops won't set it off, which matters for Brutes and Tanks. Immobilize alerts and pet mez alerts can be switched on in **Options → Alerts**, along with a sound: the Windows alert, five built-in tones, or your own `.wav`, `.ogg` or `.mp3` file. The pop-up matches the skin you're using.
 
 ![A hold alert popping up above the meter](docs/guide/alert.gif)
 

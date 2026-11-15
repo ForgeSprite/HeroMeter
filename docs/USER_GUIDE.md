@@ -199,7 +199,8 @@ Which pop-ups you get.
 - Immobilize happens a lot, so it starts off.
 - The log doesn't say how long an effect lasts, so there are no timers.
 - **Show a test alert** shows what one looks like.
-- Turn on the sound and pick one: the Windows alert, a built-in Chime, Ping, Alarm, Soft tone or Power down, or **Choose your own (.wav)**. Press **▶ Play** to hear it.
+- Turn on the sound and pick one: the Windows alert, a built-in Chime, Ping, Alarm, Soft tone or Power down, or **Choose your own sound…** (a .wav, .ogg or .mp3 file). Press **▶ Play** to hear it.
+- Your own sound is made ready once when you pick it: silence at the start is trimmed, and only the first 2 seconds play, so one alert never runs into the next. Your file isn't changed.
 
 <details><summary>All settings and defaults</summary>
 

@@ -33,7 +33,7 @@ import mids
 import pettypes
 
 APP_NAME = "Hero Meter"
-VERSION = "2.2.0"
+VERSION = "2.2.1"
 REPO = "ForgeSprite/HeroMeter"            # GitHub owner/name: update check + About links
 GUIDE_URL = "https://github.com/" + REPO + "/blob/main/docs/USER_GUIDE.md"
 # Options page -> section of the user guide (GitHub heading anchors)
@@ -234,7 +234,8 @@ DEFAULTS = {
     "records_min_fight": 20,             # shortest fight (seconds) that counts for per-second records
     "alert_taunt": True,                 # alert when an enemy taunts you (and it lands)
     "alert_sound_name": "default",       # which sound (see sounds.CHOICES)
-    "alert_sound_file": "",              # your own .wav, for "custom"
+        "alert_sound_file": "",              # your own sound, made ready as a short .wav, for "custom"
+        "alert_sound_source": "",            # the file you picked (only its name is shown)
     "last_version": "",                  # the version that last ran (for the "what's new" notice)
 }
 
@@ -6575,10 +6576,12 @@ class OptionsWin(DarkWin):
         srow.pack(fill="x", pady=(px(2), 0))
         self.button(srow, "\u25b6 Play", lambda: sounds.play(a.cfg.get("alert_sound_name", "default"),
                                                             a.cfg.get("alert_sound_file"))).pack(side="left")
-        self.button(srow, "Choose your own (.wav)\u2026", self._pick_alert_sound).pack(side="left", padx=px(6))
-        own = a.cfg.get("alert_sound_file")
+        self.button(srow, "Choose your own sound\u2026", self._pick_alert_sound).pack(side="left", padx=px(6))
+        own = a.cfg.get("alert_sound_source") or a.cfg.get("alert_sound_file")
         if own:
             self.note(0, "Your own sound: " + os.path.basename(own))
+        self.note(0, "Your own sound can be a .wav, .ogg or .mp3 file. Alerts play the first %d seconds."
+                  % int(sounds.MAX_SECS))
         row = tk.Frame(self.cols[0], bg=C["bg"])
         row.pack(fill="x", pady=px(6))
         self.button(row, "Show a test alert",
@@ -6597,15 +6600,24 @@ class OptionsWin(DarkWin):
     def _pick_alert_sound(self):
         a = self.app
         path = filedialog.askopenfilename(parent=self.top, title="Choose an alert sound",
-                                          filetypes=[("WAV sounds", "*.wav"), ("All files", "*.*")])
+                                          filetypes=[("Sounds (.wav, .ogg, .mp3)", "*.wav *.ogg *.mp3"),
+                                                     ("All files", "*.*")])
         if not path:
             return
-        if not path.lower().endswith(".wav"):
-            a.main.flash_title("Please pick a .wav file", 3)
+        try:
+            ready, info = sounds.import_custom(path, DATA_DIR)
+        except ValueError as e:
+            a.main.flash_title(str(e), 4)
             return
-        a.set_cfg("alert_sound_file", path)
+        except Exception:
+            a.main.flash_title("Couldn't read that sound file", 4)
+            return
+        a.set_cfg("alert_sound_file", ready)
+        a.set_cfg("alert_sound_source", path)
         a.set_cfg("alert_sound_name", "custom")
-        sounds.play("custom", path)
+        sounds.play("custom", ready)
+        if info["trimmed"]:
+            a.main.flash_title("Sound trimmed to %d seconds" % int(sounds.MAX_SECS), 3)
         self.show_page("page_alerts")
 
     def page_records(self):

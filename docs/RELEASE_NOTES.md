@@ -1,5 +1,11 @@
 **Hero Meter 2.2** is a free, Details!-style damage meter for City of Heroes Homecoming.
 
+### New in 2.2.1
+
+- **Your own alert sound can be a .wav, .ogg or .mp3 file** (Options → Alerts → Choose your own sound…).
+  It's made ready once when you pick it: silence at the start is trimmed and anything past 2 seconds fades out,
+  so one alert never runs into the next. Your file isn't changed.
+
 ### New in 2.2
 
 - **Share as a picture:** Report → **Copy as a picture** puts a clean image of the meter on your clipboard, with
@@ -8,7 +14,7 @@
   logs included. **← Back to today** returns to live play.
 - **Influence per hour:** a new Influence mode (Infamy for villains, Information for Praetorians), and Experience
   now shows per hour too.
-- **Alert sounds:** the Windows alert, five built-in tones, or your own .wav file (Options → Alerts).
+- **Alert sounds:** the Windows alert, five built-in tones, or your own sound file (Options → Alerts).
 - **Faster Options:** the Window Themes and Skin pages open quickly the first time.
 - **Fixed:** the status bar's damage, DPS and kills match what the meter lists, even after switching characters,
   and its right-hand text no longer hides under the resize corner.

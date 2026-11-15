@@ -22,7 +22,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install build tools
-        run: python -m pip install --upgrade pip pyinstaller numpy pillow
+        run: python -m pip install --upgrade pip pyinstaller numpy pillow soundfile
 
       - name: Check the version matches the tag
         if: startsWith(github.ref, 'refs/tags/')

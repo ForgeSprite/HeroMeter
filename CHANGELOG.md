@@ -2,6 +2,13 @@
 
 All notable changes to Hero Meter are listed here, newest first.
 
+## v2.2.1
+
+### New
+- **More alert sound formats:** Choose your own sound… now takes .ogg and .mp3 files as well as .wav.
+  Each sound is made ready once when you pick it: silence at the start is trimmed, and anything longer than
+  2 seconds fades out at 2 seconds, so one alert never runs into the next. Your file isn't changed.
+
 ## v2.2.0
 
 ### New

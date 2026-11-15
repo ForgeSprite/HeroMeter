@@ -39,7 +39,8 @@ HELP = {
     "alert_sound_name": "Which sound plays: the Windows alert, one of the built-in tones, or your own .wav file. "
                         "You hear it as you pick it.",
     "@\u25b6 Play": "Hear the sound that's picked now.",
-    "@Choose your own (.wav)\u2026": "Use any .wav file on your PC as the alert sound.",
+    "@Choose your own sound\u2026": "Use a .wav, .ogg or .mp3 file from your PC. Silence at the start is "
+                                    "trimmed, and only the first 2 seconds play. Your file isn't changed.",
     "@Show a test alert": "Shows an example alert, so you can see how it looks with your skin.",
     # --- Records
     "records_mode": "Full keeps seven records. Light keeps three: biggest hit, best fight DPS and most "

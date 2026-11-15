@@ -33,7 +33,7 @@ Every pull request is reviewed before it's merged, and changes may be asked for.
 You'll need Windows and Python 3.10 or newer.
 
 ```powershell
-pip install numpy pillow
+pip install numpy pillow soundfile
 python src/meter.py          # run it
 pip install pyinstaller
 ./build.ps1                  # build dist\HeroMeter.exe

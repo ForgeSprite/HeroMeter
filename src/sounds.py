@@ -1,5 +1,5 @@
 """Alert sounds: the Windows default, a few built-in tones (made here, so there's nothing to license or
-ship), or your own .wav file."""
+ship), or your own sound file (.wav, .ogg or .mp3), made ready once when you pick it."""
 import math
 import os
 import struct
@@ -61,6 +61,76 @@ def builtin_path(key):
             w.setframerate(RATE)
             w.writeframes(struct.pack("<%dh" % len(samples), *samples))
     return path
+
+
+MAX_SECS = 2.0          # alerts stay short, so one never runs into the next
+FADE_SECS = 0.08        # a quick fade where a long sound is cut, so it doesn't end in a click
+SILENCE = 0.01          # about -40 dB: quieter than this at the start is trimmed off
+FORMATS = (".wav", ".ogg", ".mp3")
+
+
+def import_custom(src, folder):
+    """Turn any .wav / .ogg / .mp3 into a short, ready-to-play .wav in the settings folder.
+
+    The silence at the start is trimmed and anything past MAX_SECS fades out and is cut. The original file
+    is never changed. Returns (path, info) where info has "secs" (the sound's own length) and "trimmed"
+    (True when it was cut to MAX_SECS). Raises ValueError with a short reason if it can't be used."""
+    import numpy as np
+    ext = os.path.splitext(src)[1].lower()
+    if ext not in FORMATS:
+        raise ValueError("Please pick a .wav, .ogg or .mp3 file")
+    try:
+        import soundfile as sf
+        data, rate = sf.read(src, dtype="float32", always_2d=True)
+    except ImportError:
+        if ext != ".wav":
+            raise ValueError("Please pick a .wav file")
+        data, rate = _read_wav(src)
+    except Exception:
+        raise ValueError("Couldn't read that sound file")
+    if data.shape[1] > 2:                                    # surround sound: mix it down
+        data = data.mean(axis=1, keepdims=True)
+    loud = np.nonzero(np.abs(data).max(axis=1) > SILENCE)[0]
+    if not len(loud):
+        raise ValueError("That sound is silent")
+    start = max(0, int(loud[0]) - int(rate * 0.005))         # keep 5 ms so the attack isn't clipped
+    data = data[start:]
+    secs = len(data) / float(rate)
+    cap = int(rate * MAX_SECS)
+    trimmed = len(data) > cap
+    if trimmed:
+        data = data[:cap].copy()
+        nf = min(cap, int(rate * FADE_SECS))
+        data[-nf:] *= np.linspace(1.0, 0.0, nf, dtype="float32")[:, None]
+    os.makedirs(folder, exist_ok=True)
+    stop()                                                   # Windows can't replace a file it's playing
+    dest = os.path.join(folder, "alert sound.wav")
+    pcm = (np.clip(data, -1.0, 1.0) * 32767).astype("<i2")
+    with wave.open(dest, "wb") as w:
+        w.setnchannels(pcm.shape[1])
+        w.setsampwidth(2)
+        w.setframerate(int(rate))
+        w.writeframes(pcm.tobytes())
+    return dest, {"secs": secs, "trimmed": trimmed}
+
+
+def _read_wav(src):
+    """Plain 16-bit .wav without the sound library (only used if it's missing)."""
+    import numpy as np
+    with wave.open(src, "rb") as w:
+        if w.getsampwidth() != 2:
+            raise ValueError("Couldn't read that sound file")
+        ch, rate = w.getnchannels(), w.getframerate()
+        raw = np.frombuffer(w.readframes(w.getnframes()), dtype="<i2")
+    return (raw.reshape(-1, ch).astype("float32") / 32768.0), rate
+
+
+def stop():
+    try:
+        import winsound
+        winsound.PlaySound(None, 0)
+    except Exception:
+        pass
 
 
 def play(key, custom_file=None):
