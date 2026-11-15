@@ -22,3 +22,6 @@ src/_*.jpg
 color_log.txt*
 freeze-log.txt
 error_log.txt
+
+# converted alert sound (portable settings live next to the exe)
+alert sound.wav
