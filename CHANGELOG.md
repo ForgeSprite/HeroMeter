@@ -2,6 +2,31 @@
 
 All notable changes to Hero Meter are listed here, newest first.
 
+## v2.3.0
+
+### New
+- **Procs under the power that fired them** (Options → Breakdown, off by default): each damage
+  proc is credited to the attack that just hit that target, so a breakdown shows, say, "Fire Blast + 1 proc" with
+  the proc counted in its total. Open it to see the attack and each proc. Procs nothing set off stay in the Procs
+  row, and Interface stays its own line. Suggested by a player on the forums.
+
+### Changed
+- **Options are easier to find your way around.** Every page now only holds what its name says:
+  - New **Breakdown** page for the powers list (procs, damage-over-time, crits) and the DPS graph.
+  - **Death Recap** holds only the recap settings and sits with the other meter pages.
+  - **Windows** now has a Behavior section (always on top, focus, minimize when unfocused, scaling);
+    Opacity & Fading keeps opacity, fading and click-through.
+  - **Profiles** moved to the new **Setup & Data** group, since a profile saves your whole setup.
+  - Details! skin colors moved to **Skin & Layout**; "Load earlier fights" moved to **Fights & Segments**.
+  - Alerts are split into You, Your Pets, Chat Log Warnings, Sound and Test; General into Numbers and
+    Responsiveness.
+  - "Show pet type" is only on the Pets page now (it was on two pages); Statusbar is now Status Bar.
+  - No setting changed its value.
+
+### Fixed
+- In the City of Heroes skin, the square corners of the Options, Death Recap, Breakdown and other windows no
+  longer poke over the frame's rounded corners. The content now stays inside the curve at every size.
+
 ## v2.2.1
 
 ### New

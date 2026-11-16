@@ -33,17 +33,17 @@ import mids
 import pettypes
 
 APP_NAME = "Hero Meter"
-VERSION = "2.2.1"
+VERSION = "2.3.0"
 REPO = "ForgeSprite/HeroMeter"            # GitHub owner/name: update check + About links
 GUIDE_URL = "https://github.com/" + REPO + "/blob/main/docs/USER_GUIDE.md"
 # Options page -> section of the user guide (GitHub heading anchors)
-GUIDE_ANCHORS = {"page_general": "general", "page_fights": "fights-and-segments", "page_pets": "pets",
+GUIDE_ANCHORS = {"page_general": "general", "page_fights": "fights-and-segments", "page_breakdown": "breakdown", "page_pets": "pets",
                  "page_alerts": "alerts", "page_records": "records", "page_skins": "skin-and-layout",
                  "page_wthemes": "window-themes", "page_themes": "bar-themes", "page_bars": "bars",
-                 "page_texts": "bar-text", "page_title": "title-bar", "page_status": "statusbar",
-                 "page_tips": "tooltips", "page_windows": "windows-and-tabs",
+                 "page_texts": "bar-text", "page_title": "title-bar", "page_status": "status-bar",
+                 "page_tips": "tooltips", "page_windows": "windows",
                  "page_opacity": "opacity-and-fading", "page_profiles": "profiles", "page_log": "log-files",
-                 "page_combat": "death-recap-and-breakdown", "page_mids": "builds",
+                 "page_combat": "death-recap", "page_mids": "builds",
                  "page_rename": "rename-powers", "page_weditor": "window-theme-editor",
                  "page_editor": "bar-theme-editor"}
 FROZEN = getattr(sys, "frozen", False)
@@ -131,6 +131,7 @@ DEFAULTS = {
     "recap_reverse": False,
     "dot_separate": False,
     "merge_crits": False,
+    "procs_by_power": False,            # breakdown: damage procs sit under the power that fired them
     # bars
     "row_spacing": 1,
     "grow_up": False,
@@ -1167,6 +1168,38 @@ COH_STANDIN_BOLD = "Bahnschrift SemiBold"
 STANDIN_ROW_FONTS = ("Bahnschrift SemiBold", "Bahnschrift", "Oswald", "Segoe UI Semibold", "")
 
 
+_CORNER_RISE = {}
+
+
+def coh_corner_rise(sc, inset, tab=True, top=False):
+    """How far the CoH frame's rounded corners reach into a body inset by `inset` from the window's sides
+    (and bottom), so square content can stay clear of them. top=True: the corners just under the title
+    (the body starts below the tab plus the border). Measured once per size."""
+    key = (round(sc, 3), inset, tab, top)
+    if key not in _CORNER_RISE:
+        rise = 0
+        try:
+            w = h = 200
+            img = cohframe.render_fast_rgba(w, h, (90, 140, 220), sc, tab=tab)
+            px_ = img.load()
+            tab_h, b = cohframe.metrics(sc, tab)
+            edge = (tab_h + b) if top else (h - inset - 1)
+            step = 1 if top else -1
+            for x in range(inset, inset + 60):
+                for d in range(0, 60):
+                    y = edge + step * d
+                    if not 0 <= y < h:
+                        break
+                    r, g, bl, al = px_[x, y]
+                    if al > 230 and r + g + bl > 120:          # the bright border, not the dark see-through body
+                        rise = max(rise, d + 1)
+            rise += 1 if rise else 0
+        except Exception:
+            rise = 0
+        _CORNER_RISE[key] = rise
+    return _CORNER_RISE[key]
+
+
 def coh_scale(app=None):
     """Frame size factor: 1.0 = the game's windows at 4K / 150%."""
     f = float((app.cfg.get("coh_frame_scale", 1.0) if app is not None else 1.0) or 1.0)
@@ -2034,6 +2067,8 @@ def fold_procs(app, seg, bd, key, open_bucket=None):
             pkeys.update(getattr(pa, attr, {}) or {})
 
     def bucket(k):
+        if k.endswith("@procs"):                         # a power with its procs attached: never folded
+            return None
         if prefixed and k in pkeys:
             return "@procs" if ": " in k else None
         pre, sep, rest = k.partition(": ")
@@ -2070,8 +2105,73 @@ def fold_procs(app, seg, bd, key, open_bucket=None):
     return bd
 
 
+def attach_procs(app, bd, mode):
+    """Option: put each damage proc under the power that fired it. The power's row then counts its procs
+    (its hits and averages stay the power's own), and opening it shows the power and each proc. Procs that
+    no attack set off (or that fired from something not in this list) stay in the usual Procs row."""
+    if bd is None or not bd.tabs or mode not in ("damage", "dps") or not app.cfg.get("procs_by_power"):
+        return bd
+    a = getattr(bd, "actor", None)
+    label, kind, data = bd.tabs[0]
+    by = getattr(a, "proc_by", None)
+    if kind != "stats" or not by or not data or not isinstance(data[0][0], str):
+        return bd
+    items = {it[0]: it for it in data}
+    attached, rest = {}, {}
+    for (owner, proc), st in by.items():
+        if proc not in items:
+            continue
+        if owner and owner in items:
+            attached.setdefault(owner, []).append((proc, st))
+        else:
+            _get_stat(rest, proc).merge(st)
+    if not attached:
+        return bd
+    out, members = [], {}
+    for it in data:
+        k, name, s, color = it
+        if any(p == k for (_o, p) in by):                 # a proc: only what wasn't attached stays
+            if k in rest and rest[k].total > 0:
+                out.append((k, name, rest[k], color))
+            continue
+        procs = attached.get(k)
+        if not procs:
+            out.append(it)
+            continue
+        st = cp.Stat()
+        st.merge(s)
+        for _p, ps in procs:
+            st.total += ps.total
+            for d_self, d_o in ((st.dtypes, ps.dtypes), (st.targets, ps.targets)):
+                for kk, v in d_o.items():
+                    d_self[kk] = d_self.get(kk, 0.0) + v
+        bk = k + "\u2063@procs"
+        n = len(procs)
+        out.append((bk, "%s  + %d proc%s" % (name, n, "" if n == 1 else "s"), st, color))
+        members[bk] = [(k, name, s, color)] * (s.total > 0) + [(p, p, ps, PROC_COLOR) for p, ps in
+                                                 sorted(procs, key=lambda x: -x[1].total)]
+    bd.tabs[0] = (label, kind, out)
+    bd.proc_members = members
+    return bd
+
+
+def _get_stat(d, k):
+    s = d.get(k)
+    if s is None:
+        s = d[k] = cp.Stat()
+    return s
+
+
 def build_breakdown(app, seg, mode, key, procs=None):
-    return fold_procs(app, seg, _build_breakdown(app, seg, mode, key), key, procs)
+    bd = attach_procs(app, _build_breakdown(app, seg, mode, key), mode)
+    members = getattr(bd, "proc_members", None) or {}
+    if procs is not None and procs in members:           # one power opened: the power and its procs
+        label, kind, _data = bd.tabs[0]
+        bd.tabs[0] = (label, kind, members[procs])
+        bd.title += "  \u203a  " + procs.split("\u2063")[0]
+        bd.procs_open = procs
+        return bd
+    return fold_procs(app, seg, bd, key, procs)
 
 
 def _build_breakdown(app, seg, mode, key):
@@ -2574,9 +2674,14 @@ class DarkWin:
         self.tb.pack_forget()
         self.body.pack_forget()
         if coh:
-            b = cohframe.metrics(coh_scale(self.app))[1]
+            sc = coh_scale(self.app)
+            b = cohframe.metrics(sc)[1]
+            side = b + px(3)
             self.tb.pack(side="top", fill="x", padx=b, pady=(0, b))
-            self.body.pack(side="top", fill="both", expand=True, padx=b + px(3), pady=(0, b + px(3)))
+            # keep the body's square corners inside the frame's rounded ones
+            tab = not getattr(self, "NO_TAB", False)
+            self.body.pack(side="top", fill="both", expand=True, padx=side,
+                           pady=(coh_corner_rise(sc, side, tab, top=True), side + coh_corner_rise(sc, side, tab)))
         else:
             self.tb.pack(side="top", fill="x", padx=1, pady=(1, 0))
             self.body.pack(side="top", fill="both", expand=True, padx=1, pady=(0, 1))
@@ -5210,16 +5315,17 @@ class OptionsWin(DarkWin):
             self.app.toggle_demo(False)
 
     PAGES = [("@Meter", None),
-             ("General", "page_general"), ("Fights & Segments", "page_fights"), ("Pets", "page_pets"),
-             ("Alerts", "page_alerts"), ("Records", "page_records"),
+             ("General", "page_general"), ("Fights & Segments", "page_fights"), ("Breakdown", "page_breakdown"),
+             ("Death Recap", "page_combat"), ("Pets", "page_pets"), ("Alerts", "page_alerts"),
+             ("Records", "page_records"),
              ("@Look", None),
              ("Skin & Layout", "page_skins"), ("Window Themes", "page_wthemes"), ("Bar Themes", "page_themes"),
              ("Bars", "page_bars"), ("Bar Text", "page_texts"), ("Title Bar", "page_title"),
-             ("Statusbar", "page_status"), ("Tooltips", "page_tips"),
+             ("Status Bar", "page_status"), ("Tooltips", "page_tips"),
              ("@Windows", None),
-             ("Windows & Tabs", "page_windows"), ("Opacity & Fading", "page_opacity"), ("Profiles", "page_profiles"),
-             ("@Data", None),
-             ("Log Files", "page_log"), ("Death Recap & Breakdown", "page_combat"), ("Builds", "page_mids"),
+             ("Windows", "page_windows"), ("Opacity & Fading", "page_opacity"),
+             ("@Setup & Data", None),
+             ("Profiles", "page_profiles"), ("Log Files", "page_log"), ("Builds", "page_mids"),
              ("Rename Powers", "page_rename")]
     PARENT = {"page_weditor": "page_wthemes", "page_editor": "page_themes"}     # editors open from these
     LEGACY = {"page_display": "page_general", "page_body": "page_opacity", "page_auto": "page_opacity"}
@@ -5687,14 +5793,15 @@ class OptionsWin(DarkWin):
 
     # ------------------------------------------------------------------ pages
     def page_general(self):
-        self.section(0, "General")
+        self.section(0, "Numbers")
         self.dropdown(0, "num_format", "Number format",
                       [("short", "12.3K  (short)"), ("full", "12,345  (full)"), ("plain", "12345  (plain)")])
-        self.slider(0, "update_interval", "Update interval (sec)", 0.1, 2.0, 0.1)
-        self.slider(0, "wheel_speed", "Mouse wheel speed", 1, 5)
         self.dropdown(0, "time_measure", "Time measure",
                       [("effective", "Effective (whole fight)"), ("active", "Active (only while attacking)")])
         self.check(0, "realtime_dps", "Show real-time DPS (last 5 sec) while fighting")
+        self.section(1, "Responsiveness")
+        self.slider(1, "update_interval", "Update interval (sec)", 0.1, 2.0, 0.1)
+        self.slider(1, "wheel_speed", "Mouse wheel speed", 1, 5)
 
     page_display = page_general
 
@@ -5705,6 +5812,8 @@ class OptionsWin(DarkWin):
         self.check(0, "erase_trash", "Auto-erase short trash fights")
         self.slider(0, "trash_seconds", "...shorter than (sec)", 1, 30)
         self.slider(0, "max_segments", "Fights to keep", 5, 100)
+        self.section(0, "Fight History")
+        self.check(0, "load_history", "Load earlier fights from today's log on start")
         self.section(1, "Overall Data")
         self.dropdown(1, "overall_clear", "Clear overall data",
                       [("manual", "Only when I reset"), ("zone", "On zone change"),
@@ -5722,6 +5831,7 @@ class OptionsWin(DarkWin):
     def page_log(self):
         a = self.app
         self.section(0, "Log File")
+        self.note(0, "The game must have 'Log Chat' turned on (Options \u2192 Windows \u2192 Chat).")
         self.log_label = tk.Label(self.cols[0], text="", bg=C["bg"], fg=C["dim"], font=FONTS["small"], anchor="w",
                                   justify="left", wraplength=px(560))
         self.log_label.pack(fill="x")
@@ -5731,7 +5841,6 @@ class OptionsWin(DarkWin):
         self.button(row, "Choose Log File…", lambda: (a.browse_log(), self.update_log_label())).pack(
             side="left", padx=px(6))
         self.button(row, "Logs Folder…", lambda: (a.browse_logs_dir(), self.update_log_label())).pack(side="left")
-        self.check(0, "load_history", "Load earlier fights from today's log on start")
         self.section(0, "Logging Pets")
         self.note(0, "Pets, and powers like Rain of Fire, Caltrops or Burn that do their damage through an "
                      "invisible pet, only reach the chat log if the Pet channels are in one of your chat tabs:")
@@ -5762,7 +5871,6 @@ class OptionsWin(DarkWin):
         if dirs:
             self.button(row2, "Open logs folder", lambda: os.startfile(dirs[0])).pack(side="left", padx=px(6))
         self.update_log_stats(getattr(a, "_log_cleanup_result", None))
-        self.note(0, "The game must have 'Log Chat' turned on (Options → Windows → Chat).")
         self.update_log_label()
 
     def update_log_stats(self, res=None):
@@ -5784,6 +5892,18 @@ class OptionsWin(DarkWin):
                 "" if res["deleted"] == 1 else "s")
         lab.configure(text=txt)
 
+    def page_breakdown(self):
+        a = self.app
+        refresh = lambda: a.breakdown.refresh() if getattr(a, "breakdown", None) else None
+        self.section(0, "Powers List")
+        self.check(0, "procs_by_power", "Show damage procs under the power that fired them",
+                   after=lambda: (refresh(), a.redraw(force=True)))
+        self.check(0, "dot_separate", "Show damage-over-time as its own line")
+        self.check(0, "merge_crits", "Merge critical hits into normal hits")
+        self.note(0, "Changing the damage-over-time option re-reads today's log.")
+        self.section(1, "Breakdown Window")
+        self.check(1, "bd_graph", "Show the DPS-over-time graph", after=refresh)
+
     def page_combat(self):
         self.section(0, "Death Recap")
         self.slider(0, "recap_window", "Recap length (sec)", 5, 30)
@@ -5791,13 +5911,6 @@ class OptionsWin(DarkWin):
         self.slider(0, "recap_min_heal", "Hide heals smaller than", 0, 500, 10)
         self.check(0, "recap_reverse", "Newest events first")
         self.check(0, "recap_show_misses", "Show attacks that missed you")
-        self.section(1, "Parser")
-        self.check(1, "dot_separate", "Show damage-over-time as its own line")
-        self.check(1, "merge_crits", "Merge critical hits into normal hits")
-        self.note(1, "Changing the damage-over-time option re-reads today's log.")
-        self.section(1, "Breakdown")
-        self.check(1, "bd_graph", "Show the DPS-over-time graph",
-                   after=lambda: self.app.breakdown.refresh() if getattr(self.app, "breakdown", None) else None)
 
     def page_bars(self):
         self.section(0, "Bars")
@@ -6049,7 +6162,6 @@ class OptionsWin(DarkWin):
         self.slider(0, "font_size", "Text size", 9, 26)
         self.dropdown(0, "text_style", "Text effect", [("shadow", "Shadow"), ("outline", "Outline"), ("none", "None")])
         self.check(0, "show_rank", "Show rank numbers")
-        self.check(0, "show_pet_type", "Show pet type after the name")
         self.section(1, "Right Text")
         self.check(1, "rt_total", "Show total")
         self.check(1, "rt_ps", "Show per second")
@@ -6070,12 +6182,8 @@ class OptionsWin(DarkWin):
         self.note(1, "Settings and Close are always shown.")
 
     def page_opacity(self):
-        self.section(0, "Window")
+        self.section(0, "Opacity")
         self.slider(0, "alpha", "Opacity (%)", 20, 100, 1, 100.0)
-        self.check(0, "topmost", "Always on top (also above City of Heroes)")
-        self.check(0, "no_focus", "Clicking the meter doesn't take focus from the game")
-        self.check(0, "hide_unfocused", "Minimize while City of Heroes isn't focused")
-        self.check(0, "auto_dpi", "Match each monitor's Windows scaling automatically")
         self.section(0, "Fade")
         self.check(0, "ooc_fade", "Fade out when not in combat")
         self.slider(0, "ooc_alpha", "Out-of-combat opacity (%)", 0, 100, 1, 100.0)
@@ -6087,17 +6195,12 @@ class OptionsWin(DarkWin):
         self.check(1, "click_through", "Click-through (clicks go to the game)")
         self.check(1, "click_through_combat", "Click-through only in combat")
         self.note(1, "Hold Ctrl to click the meter while click-through is on.")
-        self.section(1, "Details! Skin Window")
-        self.color(1, "body_bg", "Background color")
-        self.check(1, "border_on", "Window border")
-        self.color(1, "border_color", "Border color")
-        self.note(1, "Only used by the Details! skin. Colors for every skin come from Window Themes.")
 
     page_body = page_opacity
 
     def page_status(self):
-        self.section(0, "Statusbar")
-        self.check(0, "statusbar", "Show statusbar")
+        self.section(0, "Status Bar")
+        self.check(0, "statusbar", "Show the status bar")
         self.dropdown(0, "sb_left", "Left", SB_CHOICES)
         self.dropdown(0, "sb_center", "Center", SB_CHOICES)
         self.dropdown(0, "sb_right", "Right", SB_CHOICES)
@@ -6230,6 +6333,11 @@ class OptionsWin(DarkWin):
             else:
                 a.main.flash_title("Type a name for the layout first", 2.5)
         self.button(row, "Save current layout", save).pack(side="left", padx=px(6))
+        self.section(0, "Details! Skin Colors")
+        self.color(0, "body_bg", "Background color")
+        self.check(0, "border_on", "Window border")
+        self.color(0, "border_color", "Border color")
+        self.note(0, "Only used by the Details! skin. Colors for every skin come from Window Themes.")
 
     def _look_preview_args(self, wtheme, w, h, on, title, border=None):
         """What cohframe.preview needs to draw one City of Heroes skin card."""
@@ -6538,9 +6646,14 @@ class OptionsWin(DarkWin):
         row.pack(fill="x", pady=px(4))
         self.button(row, "Open a new window", lambda: (a.new_meter(a.main), self.show_page("page_windows"))).pack(
             side="left")
-        self.section(0, "Snapping")
-        self.check(0, "snap_windows", "Snap windows together when dragged close")
-        self.note(0, "Snapped windows move together when you drag one of them.\n"
+        self.section(0, "Behavior")
+        self.check(0, "topmost", "Always on top (also above City of Heroes)")
+        self.check(0, "no_focus", "Clicking the meter doesn't take focus from the game")
+        self.check(0, "hide_unfocused", "Minimize while City of Heroes isn't focused")
+        self.check(0, "auto_dpi", "Match each monitor's Windows scaling automatically")
+        self.section(1, "Snapping")
+        self.check(1, "snap_windows", "Snap windows together when dragged close")
+        self.note(1, "Snapped windows move together when you drag one of them.\n"
                      "Hold Alt while dragging to pull one window away.")
         self.section(1, "Tabs")
         self.check(1, "tabs_always", "Always show the tab bar")
@@ -6561,28 +6674,32 @@ class OptionsWin(DarkWin):
 
     def page_alerts(self):
         a = self.app
-        self.section(0, "Alerts")
         self.note(0, "A short message pops up just above the meter when something needs your attention. "
                      "It only reacts to what's happening now, never to old lines read when the meter starts.")
+        self.section(0, "You")
         self.check(0, "alert_mez", "When you're held, stunned, slept, terrified or confused")
         self.check(0, "alert_immob", "Also when you're immobilized (it happens a lot, so it's off at first)")
         self.check(0, "alert_taunt", "When an enemy taunts you")
+        self.section(0, "Your Pets")
         self.check(0, "alert_pet_dead", "When one of your pets is defeated")
         self.check(0, "alert_pet_mez", "When one of your pets is held, stunned or slept")
+        self.section(0, "Chat Log Warnings")
         self.check(0, "alert_pet_log", "When pet or pseudo-pet damage isn't reaching the chat log")
-        self.check(0, "alert_sound", "Play a sound with each alert")
-        self.dropdown(0, "alert_sound_name", "Sound", sounds.CHOICES, setter=self._set_alert_sound)
-        srow = tk.Frame(self.cols[0], bg=C["bg"])
+        self.section(1, "Sound")
+        self.check(1, "alert_sound", "Play a sound with each alert")
+        self.dropdown(1, "alert_sound_name", "Sound", sounds.CHOICES, setter=self._set_alert_sound)
+        srow = tk.Frame(self.cols[1], bg=C["bg"])
         srow.pack(fill="x", pady=(px(2), 0))
         self.button(srow, "\u25b6 Play", lambda: sounds.play(a.cfg.get("alert_sound_name", "default"),
                                                             a.cfg.get("alert_sound_file"))).pack(side="left")
         self.button(srow, "Choose your own sound\u2026", self._pick_alert_sound).pack(side="left", padx=px(6))
         own = a.cfg.get("alert_sound_source") or a.cfg.get("alert_sound_file")
         if own:
-            self.note(0, "Your own sound: " + os.path.basename(own))
-        self.note(0, "Your own sound can be a .wav, .ogg or .mp3 file. Alerts play the first %d seconds."
+            self.note(1, "Your own sound: " + os.path.basename(own))
+        self.note(1, "Your own sound can be a .wav, .ogg or .mp3 file. Alerts play the first %d seconds."
                   % int(sounds.MAX_SECS))
-        row = tk.Frame(self.cols[0], bg=C["bg"])
+        self.section(1, "Test")
+        row = tk.Frame(self.cols[1], bg=C["bg"])
         row.pack(fill="x", pady=px(6))
         self.button(row, "Show a test alert",
                     lambda: a.alert((time.time(), "mez", a.build_char(), "Test Enemy", "Holds", "Example Power"),
@@ -6624,14 +6741,14 @@ class OptionsWin(DarkWin):
         a = self.app
         c = a.cfg
         store = c.setdefault("records", {})
-        self.section(0, "Personal Records")
+        self.section(0, "Record Settings")
         self.note(0, "Your best numbers for each character, from fights the meter saw live. A fight has to last "
                      "a while to count for the per-second records, so one lucky crit can't set them.")
         self.dropdown(0, "records_mode", "Records to keep", [("full", "Full list"), ("light", "Light (3 records)")],
                       setter=lambda v: (a.set_cfg("records_mode", v), self.show_page("page_records")))
         self.check(0, "records_popup", "Pop up when you set a new record")
         self.check(0, "records_by_build", "Keep separate records for each linked build")
-        self.slider(0, "records_min_fight", "Min. fight length (sec)", 5, 60)
+        self.slider(0, "records_min_fight", "Shortest fight that counts (sec)", 5, 60)
         chars = sorted(store)
         if not chars:
             self.note(0, "No records yet. They start with your next fight.")
@@ -6641,7 +6758,7 @@ class OptionsWin(DarkWin):
             pc = a.parser.player
             cur = pc if pc in store else chars[0]
         self._rec_char = cur
-        self.section(1, "Records")
+        self.section(1, "Your Records")
         self.dropdown(1, None, "Character", [(ch, ch) for ch in chars], getter=lambda: self._rec_char,
                       setter=lambda v: (setattr(self, "_rec_char", v), self.show_page("page_records")))
         entry = store[cur]

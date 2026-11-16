@@ -1,29 +1,20 @@
-**Hero Meter 2.2** is a free, Details!-style damage meter for City of Heroes Homecoming.
+**Hero Meter 2.3** is a free, Details!-style damage meter for City of Heroes Homecoming.
 
-### New in 2.2.1
+### New in 2.3
 
-- **Your own alert sound can be a .wav, .ogg or .mp3 file** (Options → Alerts → Choose your own sound…).
-  It's made ready once when you pick it: silence at the start is trimmed and anything past 2 seconds fades out,
-  so one alert never runs into the next. Your file isn't changed.
+- **Procs under the power that fired them** (Options → Breakdown, off by default). Each damage proc is credited
+  to the attack that just hit that target, so a breakdown shows, say, **Fire Blast + 1 proc** with the proc counted
+  in its total. Click it to see the attack and each proc. Procs nothing set off stay in the Procs row, and
+  Interface stays its own line. Thanks to the player on the forums who suggested it!
+- **Cleaner Options.** Every page now holds only what its name says: a new **Breakdown** page, **Death Recap** on
+  its own, window behavior on **Windows**, **Profiles** under the new **Setup & Data** group, and Alerts split into
+  clear sections. No setting changed its value.
+- **Fixed:** in the City of Heroes skin, window contents no longer poke over the frame's rounded corners.
 
-### New in 2.2
+### Recently (2.2)
 
-- **Share as a picture:** Report → **Copy as a picture** puts a clean image of the meter on your clipboard, with
-  your character, the fight and the key totals. Paste it straight into Discord, or **Save as a picture…** for a PNG.
-- **Earlier days:** Segments → **Earlier days…** opens any earlier day's fights, deaths and breakdowns, zipped
-  logs included. **← Back to today** returns to live play.
-- **Influence per hour:** a new Influence mode (Infamy for villains, Information for Praetorians), and Experience
-  now shows per hour too.
-- **Alert sounds:** the Windows alert, five built-in tones, or your own sound file (Options → Alerts).
-- **Faster Options:** the Window Themes and Skin pages open quickly the first time.
-- **Fixed:** the status bar's damage, DPS and kills match what the meter lists, even after switching characters,
-  and its right-hand text no longer hides under the resize corner.
-
-### Recent fixes (2.1.1)
-
-- One swing with Rage (or any two-damage-type power) counts as one hit.
-- Mez alerts only when the mez actually lands, plus a new taunt alert.
-- Minimize while City of Heroes isn't focused (2.1, thanks to **@cmihran**).
+- **Share as a picture** (Report → Copy as a picture), **Earlier days** (Segments → Earlier days…), an
+  **Influence** mode with per-hour rates, and **alert sounds**: built-in tones or your own .wav, .ogg or .mp3.
 
 ![Hero Meter windows](https://raw.githubusercontent.com/ForgeSprite/HeroMeter/main/docs/screenshots/meter-windows.png)
 
@@ -39,7 +30,7 @@ If Windows says **"Windows protected your PC"**, click **More info → Run anywa
 
 - **Sixteen modes:** damage, DPS, healing, damage taken, kills, deaths, accuracy, absorbs, bodyguard, experience, influence and more, for every fight and overall.
 - **Masterminds welcome:** every pet on its own bar, grouped by tier, or rolled into yours. Pseudo pets like Rain of Fire count as your damage.
-- **Breakdowns:** click a bar for powers, Shift+click for hits, averages, crits and a DPS-over-time graph.
+- **Breakdowns:** click a bar for powers, Shift+click for hits, averages, crits and a DPS-over-time graph. Procs can sit under the attack that fired them.
 - **Death recap:** the last few seconds before you died, hit by hit.
 - **Alerts:** a pop-up and a sound of your choice when you're held, stunned, slept or taunted, or a pet goes down.
 - **Personal records** for each character.

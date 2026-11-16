@@ -94,11 +94,11 @@ HELP = {
     "btn_report": "The button that copies the numbers, ready to paste in game chat.",
     "btn_reset": "The button that clears all fights and Overall.",
     "btn_min": "The button that minimizes Hero Meter to the taskbar.",
-    # --- Statusbar
+    # --- Status bar
     "statusbar": "A thin strip under the bars with up to three extra numbers.",
-    "sb_left": "What the left side of the statusbar shows. Totals add up every bar on the meter.",
-    "sb_center": "What the middle of the statusbar shows.",
-    "sb_right": "What the right side of the statusbar shows. Totals add up every bar on the meter.",
+    "sb_left": "What the left side of the status bar shows. Totals add up every bar on the meter.",
+    "sb_center": "What the middle of the status bar shows.",
+    "sb_right": "What the right side of the status bar shows. Totals add up every bar on the meter.",
     # --- Tooltips
     "tip_enabled": "Hovering a bar shows its top powers.",
     "tip_font_size": "Size of the tooltip text.",
@@ -151,6 +151,8 @@ HELP = {
     "recap_min_heal": "Hide heals smaller than this, like regeneration ticks, to keep the recap short.",
     "recap_reverse": "Put the killing blow at the top instead of the bottom.",
     "recap_show_misses": "Also list attacks that missed you.",
+    "procs_by_power": "Breakdowns show each damage proc under the attack that fired it, and the attack's total "
+                      "includes them. Procs nothing set off stay in the Procs row. Off: all procs in one Procs row.",
     "dot_separate": "Show damage-over-time ticks as their own line, apart from the hit that started them. "
                     "Changing this reads today's log again.",
     "merge_crits": "In the breakdown, count critical hits together with normal hits instead of listing them separately.",

@@ -43,6 +43,8 @@ Right-click the title to switch modes.
 
 Shift+click a bar for the full breakdown: every power with hits, averages, the biggest hit, accuracy, damage types and targets, plus a DPS-over-time graph of the fight with its peak and average.
 
+Damage procs can be shown under the attack that fired them (**Options → Breakdown**), so you see what each attack really does with its procs, like **Fire Blast + 1 proc**.
+
 ![The breakdown window](docs/screenshots/breakdown.png)
 
 ### Masterminds

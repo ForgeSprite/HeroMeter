@@ -59,6 +59,8 @@ Click a bar to see that character's or pet's powers. Right-click to go back.
 
 Shift+click a bar for the full breakdown: every power with hits, average, biggest hit, accuracy and targets, plus a DPS-over-time graph.
 
+Damage procs are gathered into one **Procs** row; click it to see each one. Want to see what each attack really does with its procs? Turn on **Show damage procs under the power that fired them** on the [Breakdown](#breakdown) page. Each attack then shows as, say, **Fire Blast + 1 proc**, counting its procs in its total (its hits and averages stay its own), and clicking it shows the attack and each proc. Procs nothing set off, like ones in Health or Stamina, stay in the Procs row, and Interface stays a line of its own.
+
 ### Change what the meter shows
 
 Right-click the title and pick a mode.
@@ -112,7 +114,7 @@ Click **Report** and choose **Copy as a picture**, then paste it into Discord or
 
 ## Options
 
-Open it with **⚙ → Options…**. Pages are grouped into Meter, Look, Windows and Data.
+Open it with **⚙ → Options…**. Pages are grouped into Meter, Look, Windows, and Setup & Data.
 
 Not sure what a setting does? Hover over its name for a short note and its default.
 
@@ -142,10 +144,10 @@ Numbers, refresh speed and how DPS is counted.
 | Setting | Default |
 |---|---|
 | Number format | 12.3K (short). Also 12,345 (full) or 12345 (plain) |
-| Update interval | 0.3 sec |
-| Mouse wheel speed | 1 |
 | Time measure | Effective (whole fight) |
 | Show real-time DPS (last 5 sec) while fighting | Off |
+| Update interval | 0.3 sec |
+| Mouse wheel speed | 1 |
 
 </details>
 
@@ -167,7 +169,46 @@ When a fight ends and what's kept.
 | Auto-erase short trash fights | Off |
 | ...shorter than | 5 sec |
 | Fights to keep | 30 |
+| Load earlier fights from today's log on start | On |
 | Clear overall data | Only when I reset |
+
+</details>
+
+### Breakdown
+
+What the powers list shows when you open a bar, and the breakdown window.
+
+![The Breakdown page](guide/opt-breakdown.png)
+
+- **Show damage procs under the power that fired them** shows each attack with its procs, like **Fire Blast + 1 proc**. See [See someone's powers](#see-someones-powers).
+- Changing the damage-over-time option reads today's log again.
+
+<details><summary>All settings and defaults</summary>
+
+| Setting | Default |
+|---|---|
+| Show damage procs under the power that fired them | Off |
+| Show damage-over-time as its own line | Off |
+| Merge critical hits into normal hits | Off |
+| Show the DPS-over-time graph | On |
+
+</details>
+
+### Death recap
+
+What the recap shows when you die.
+
+![The Death recap page](guide/opt-combat.png)
+
+<details><summary>All settings and defaults</summary>
+
+| Setting | Default |
+|---|---|
+| Recap length | 12 sec |
+| Events to show | 40 |
+| Hide heals smaller than | 0 |
+| Newest events first | Off |
+| Show attacks that missed you | On |
 
 </details>
 
@@ -234,7 +275,7 @@ Your best numbers for each character, from fights the meter saw live.
 | Records to keep | Full list |
 | Pop up when you set a new record | On |
 | Keep separate records for each linked build | Off |
-| Min. fight length | 20 sec |
+| Shortest fight that counts | 20 sec |
 
 </details>
 
@@ -246,6 +287,7 @@ The shape of every window.
 
 - City of Heroes (the default) looks like the game's own windows. Details! is the flat look of the WoW addon.
 - Layout presets change sizes and fonts in one click. **Save current layout** keeps your own.
+- The **Details! skin colors** (background and border) are on this page too. They only change the Details! skin; every other color comes from Window Themes.
 
 ### Window themes
 
@@ -303,7 +345,6 @@ Font and the numbers on each bar.
 |---|---|
 | Font, size and text effect | Set by your skin |
 | Show rank numbers | On |
-| Show pet type after the name | On |
 | Show total | On |
 | Show per second | On |
 | Show percent | On |
@@ -328,17 +369,17 @@ Font and the numbers on each bar.
 
 </details>
 
-### Statusbar
+### Status bar
 
 An optional strip under the bars.
 
-![The Statusbar page](guide/opt-status.png)
+![The Status bar page](guide/opt-status.png)
 
 <details><summary>All settings and defaults</summary>
 
 | Setting | Default |
 |---|---|
-| Show statusbar | Off |
+| Show the status bar | Off |
 | Left | Segment name |
 | Center | Fight timer |
 | Right | Total DPS (all bars) |
@@ -362,15 +403,32 @@ Total DPS and total damage add up every bar on the meter, which is usually you a
 
 </details>
 
-### Windows and tabs
+### Windows
 
-More meters, each with its own mode and fight.
+More meters, how the meter behaves next to the game, snapping and tabs.
 
-![The Windows and tabs page](guide/opt-windows.png)
+![The Windows page](guide/opt-windows.png)
 
+- **Always on top** keeps the meter above City of Heroes.
+- **Minimize while City of Heroes isn't focused** sends the meter to the taskbar when you switch to
+  another program, and brings it back when you click into the game. It stays visible while you use
+  Hero Meter's own windows, so you can see your changes in Options.
 - Drag windows close and they snap together. Hold Alt while dragging to pull one away.
 - Click **+** on the tab bar to add a tab. Middle-click a tab to close it.
 - Closing the first window closes them all.
+
+<details><summary>All settings and defaults</summary>
+
+| Setting | Default |
+|---|---|
+| Always on top | On |
+| Clicking the meter doesn't take focus from the game | On |
+| Minimize while City of Heroes isn't focused | Off |
+| Match each monitor's Windows scaling automatically | On |
+| Snap windows together when dragged close | On |
+| Always show the tab bar | Off |
+
+</details>
 
 ### Opacity and fading
 
@@ -380,19 +438,12 @@ See-through, fading and click-through.
 
 - Click-through sends your clicks to the game. Hold Ctrl to click the meter while it's on.
 - Hovering the meter always brings it back to full opacity.
-- **Minimize while City of Heroes isn't focused** sends the meter to the taskbar when you switch to
-  another program, and brings it back when you click into the game. It stays visible while you use
-  Hero Meter's own windows, so you can see your changes in Options.
 
 <details><summary>All settings and defaults</summary>
 
 | Setting | Default |
 |---|---|
 | Opacity | 100% |
-| Always on top | On |
-| Clicking the meter doesn't take focus from the game | On |
-| Minimize while City of Heroes isn't focused | Off |
-| Match each monitor's Windows scaling automatically | On |
 | Fade out when not in combat | Off (40% out of combat, 100% in combat) |
 | Fade until mouse-over | Off (35%) |
 | Click-through | Off |
@@ -424,31 +475,12 @@ Which log the meter reads, and log clean-up.
 | Setting | Default |
 |---|---|
 | Log file | Automatic (today's log) |
-| Load earlier fights from today's log on start | On |
 | Clean up old chat logs automatically | On |
 | Keep logs unzipped for | 1 week |
 | Delete zipped logs after | 6 months (or Never) |
 
 </details>
 
-### Death recap and breakdown
-
-![The Death recap and breakdown page](guide/opt-combat.png)
-
-<details><summary>All settings and defaults</summary>
-
-| Setting | Default |
-|---|---|
-| Recap length | 12 sec |
-| Events to show | 40 |
-| Hide heals smaller than | 0 |
-| Newest events first | Off |
-| Show attacks that missed you | On |
-| Show damage-over-time as its own line | Off |
-| Merge critical hits into normal hits | Off |
-| Show the DPS-over-time graph | On |
-
-</details>
 
 ### Builds
 
@@ -534,7 +566,7 @@ On the [Window themes](#window-themes) page, click **Pick it from a game window*
 
 ### The meter is in the way
 
-Turn on click-through on the [Opacity and fading](#opacity-and-fading) page. Hold Ctrl when you want to click the meter.
+Turn on click-through on the [Opacity and fading](#opacity-and-fading) page. Hold Ctrl when you want to click the meter. You can also fade it out of combat on the same page, or turn on **Minimize while City of Heroes isn't focused** on the [Windows](#windows) page.
 
 ### DPS doesn't match another parser
 

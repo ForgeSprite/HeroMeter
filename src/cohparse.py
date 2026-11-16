@@ -21,6 +21,8 @@ PET_RE = re.compile(r"^([^\[\]:]{1,40}):  (.*)$")
 
 R_DMG = re.compile(r"^You hit (.+?) with your (.+?) for " + NUM +
                    r" points? of (?:unresistable )?(.+?) damage( over time)?\.?(?: \(([^)]+)\))?\.?$")
+R_EFFECT = re.compile(r"^You (?!hit |heal |grant )\w+ (.+?) with your ([^:]+?)\.?$")
+PROC_WINDOW = 1.0      # seconds: a proc is credited to the last power that hit the same target
 R_HIT = re.compile(r"^HIT (.+?)! Your (.+?) power (?:had a ([\d.]+)% chance to hit, you rolled a [\d.]+|is autohit"
                    r"|was forced to hit by streakbreaker)")
 R_MISS = re.compile(r"^MISSED (.+?)!+ Your (.+?) power had a ([\d.]+)% chance to hit, you rolled a [\d.]+")
@@ -288,6 +290,7 @@ class Actor:
         self.timeline = {}              # time bucket -> damage (for the DPS graph)
         self.tl_step = 1                # seconds per bucket
         self.seen = {}                  # power -> times the log mentioned it (toggles, autohits, buffs)
+        self.proc_by = {}               # (power that fired it or None, proc) -> Stat (damage procs only)
 
     def touch(self, ts):
         """Track 'active time': gaps of up to 3s between actions count as fighting."""
@@ -341,6 +344,8 @@ class Actor:
         for mine, theirs in ((self.taken_by, o.taken_by), (self.healed_by, o.healed_by)):
             for k, s in theirs.items():
                 _get(mine, k).merge(s)
+        for (owner, proc), s in getattr(o, "proc_by", {}).items():
+            _get(self.proc_by, (prefix + owner if owner else None, prefix + proc)).merge(s)
 
 
 class Enemy:
@@ -457,6 +462,7 @@ class Parser:
         self._ts_cache = {}
 
     def reset(self):
+        self._trigger = {}
         self.segments = []              # closed + active segments, oldest first
         self.current = None             # active segment (or None)
         self.overall = Segment(0, is_overall=True)
@@ -620,6 +626,11 @@ class Parser:
             if m and m.group(1).strip():
                 self._login_as(m.group(1).strip())
             return
+        # a mez or debuff landing ("You Hold X with your Y"): procs right after it came from that power
+        if c0 == "Y" and " with your " in body and not body.startswith("You hit "):
+            m = R_EFFECT.match(body)
+            if m:
+                self._trigger[(who, m.group(1))] = (self.pname(m.group(2)), ts)
         # --- outgoing damage -------------------------------------------
         if c0 == "Y" and body.startswith("You hit "):
             m = R_DMG.match(body)
@@ -627,6 +638,11 @@ class Parser:
                 target, power, amt, dtype, dot, flair = m.groups()
                 amt = num(amt)
                 power = self.pname(power, bool(dot))
+                is_proc, owner = ": " in power, None
+                if is_proc:                         # a proc: credit the power that just hit this target
+                    trig = self._trigger.get((who, target))
+                    if trig is not None and 0 <= ts - trig[1] <= PROC_WINDOW:
+                        owner = trig[0]
                 extra = False
                 if not dot:
                     key = (who, power, target, int(ts))
@@ -638,6 +654,8 @@ class Parser:
                     a.touch(ts)
                     a.recent.append((ts, amt))
                     _get(a.powers, power).add(amt, bool(dot), flair, dtype, target, extra=extra)
+                    if is_proc:
+                        _get(a.proc_by, (owner, power)).add(amt, bool(dot), flair, dtype, target, extra=extra)
                     step = 5 if seg.is_overall else 1
                     b = int(ts) // step
                     a.timeline[b] = a.timeline.get(b, 0.0) + amt
@@ -656,6 +674,10 @@ class Parser:
                 target, power, chance = m.groups()
                 power = self.pname(power)
                 self._last_pkt = None               # a new roll: the next damage is a new hit
+                if ": " not in power:               # remember it, for procs that follow it
+                    if len(self._trigger) > 4000:
+                        self._trigger.clear()
+                    self._trigger[(who, target)] = (power, ts)
                 if kind == "pet" or not self._is_friendly_name(target):
                     chance = float(chance) if chance else None
                     for seg in self._targets(ts):
